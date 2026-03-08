@@ -103,13 +103,6 @@ export default async function handler(req, res) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ chat_id: chatId, text: statusMsg })
         });
-      } else if (memberUpdate && syncRes && syncRes.ok) {
-        // Auto-welcome when added to a group to provide immediate feedback
-        await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/sendMessage`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chat_id: chatId, text: "✅ Бот успешно добавлен в группу и зарегистрирован в базе данных!" })
-        });
       }
 
       return res.status(200).json({ ok: true });
