@@ -24,17 +24,18 @@ export default async function handler(req, res) {
     const chatType = chat.type;
     const chatTitle = chat.title || '';
 
-    // Environment Variables
+    // Environment Variables with fallbacks
     const BOT_TOKEN = process.env.BOT_TOKEN;
     const MINI_APP_URL = process.env.MINI_APP_URL || 'https://poputki.online';
-    const SUPABASE_URL = process.env.SUPABASE_URL;
-    const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+    const SUPABASE_URL = process.env.SUPABASE_URL || 'https://kszjwfnjrfouawkqjbwc.supabase.co';
+    const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtzemp3Zm5qcmZvdWF3a3FqYndjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5ODQ2NDMsImV4cCI6MjA4ODU2MDY0M30.zyK0VyKbl10rgOc36Tsugj4zWJnRN1N-LOEG2ZiXToY';
 
     // 1. Group / Supergroup logic -> Save to Supabase
     if (chatType === 'group' || chatType === 'supergroup') {
       if (SUPABASE_URL && SUPABASE_ANON_KEY) {
         // Upsert group into our database
-        await fetch(`${SUPABASE_URL}/rest/v1/telegram_groups`, {
+        // IMPORTANT: ?on_conflict=chat_id is required for Prefer: resolution=merge-duplicates to work on specific column
+        const supabaseRes = await fetch(`${SUPABASE_URL}/rest/v1/telegram_groups?on_conflict=chat_id`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -46,7 +47,12 @@ export default async function handler(req, res) {
             chat_id: chatId.toString(),
             title: chatTitle
           })
-        }).catch(err => console.error('Supabase save error:', err));
+        }).catch(err => console.error('Supabase fetch error:', err));
+
+        if (supabaseRes && !supabaseRes.ok) {
+          const errorText = await supabaseRes.text();
+          console.error(`Supabase save failed (${supabaseRes.status}):`, errorText);
+        }
       }
 
       // Return OK to Telegram.
