@@ -3,11 +3,11 @@
 const TELEGRAM_API = "https://api.telegram.org";
 
 export default async function handler(req, res) {
-  // Environment Variables with fallbacks
+  // Hardcoded Supabase Credentials (Overriding Vercel Env Vars to guarantee connection)
   const BOT_TOKEN = process.env.BOT_TOKEN || '8669833278:AAFHxzU9jZUZIWVrHdogUsYrkQmd_F05MZA';
   const MINI_APP_URL = process.env.MINI_APP_URL || 'https://poputki.online';
-  const SUPABASE_URL = process.env.SUPABASE_URL || 'https://kszjwfnjrfouawkqjbwc.supabase.co';
-  const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtzemp3Zm5qcmZvdWF3a3FqYndjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5ODQ2NDMsImV4cCI6MjA4ODU2MDY0M30.zyK0VyKbl10rgOc36Tsugj4zWJnRN1N-LOEG2ZiXToY';
+  const SUPABASE_URL = 'https://kszjwfnjrfouawkqjbwc.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtzemp3Zm5qcmZvdWF3a3FqYndjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5ODQ2NDMsImV4cCI6MjA4ODU2MDY0M30.zyK0VyKbl10rgOc36Tsugj4zWJnRN1N-LOEG2ZiXToY';
 
   // --- GET Setup Endpoint ---
   if (req.method === "GET") {
@@ -89,7 +89,7 @@ export default async function handler(req, res) {
       const syncRes = await syncGroup();
 
       // Handle /test command for verification
-      if (message && message.text === '/test') {
+      if (message && message.text && message.text.startsWith('/test')) {
         let statusMsg = "DB Sync Status: ";
         if (syncRes && syncRes.ok) {
           statusMsg += "✅ SUCCESS! Group ID saved/verified.";
@@ -102,6 +102,13 @@ export default async function handler(req, res) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ chat_id: chatId, text: statusMsg })
+        });
+      } else if (memberUpdate && syncRes && syncRes.ok) {
+        // Auto-welcome when added to a group to provide immediate feedback
+        await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: chatId, text: "✅ Бот успешно добавлен в группу и зарегистрирован в базе данных!" })
         });
       }
 
