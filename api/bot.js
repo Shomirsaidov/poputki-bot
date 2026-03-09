@@ -112,7 +112,7 @@ export default async function handler(req, res) {
     if (chatType === 'private' && message) {
       const text = "Poputki.online – это современное приложение, которое делает междугородние поездки проще и выгоднее.\nТы еще ждешь?\n👇ЖМИ👇";
       const replyMarkup = {
-        inline_keyboard: [[{ text: "Открыть приложение", web_app: { url: MINI_APP_URL } }]]
+        inline_keyboard: [[{ text: "Открыть приложение", web_app: { url: `${MINI_APP_URL}/search` } }]]
       };
 
       await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/sendMessage`, {
