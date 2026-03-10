@@ -115,6 +115,31 @@ export default async function handler(req, res) {
         inline_keyboard: [[{ text: "Открыть приложение", web_app: { url: `${MINI_APP_URL}/search` } }]]
       };
 
+      const persistentMenu = {
+        keyboard: [
+          [
+            { text: "Создать поездку", web_app: { url: `${MINI_APP_URL}/create` } },
+            { text: "Найти поездку", web_app: { url: `${MINI_APP_URL}/search` } }
+          ],
+          [
+            { text: "Мои поездки", web_app: { url: `${MINI_APP_URL}/my-rides` } },
+            { text: "Профиль", web_app: { url: `${MINI_APP_URL}/profile` } }
+          ]
+        ],
+        resize_keyboard: true,
+        persistent: true
+      };
+
+      await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: "Используйте меню ниже для быстрого доступа к функциям или нажмите кнопку:",
+          reply_markup: persistentMenu
+        })
+      });
+
       await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
