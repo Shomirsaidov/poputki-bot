@@ -117,27 +117,77 @@ export default async function handler(req, res) {
         const param = text.split(' ')[1];
         if (param.startsWith('ride_')) {
           const rideId = param.replace('ride_', '');
-          return res.status(200).json({
-            method: "sendMessage",
-            chat_id: chatId,
-            text: "🔍 <b>Найдена поездка!</b>\n\nНажмите кнопку ниже, чтобы посмотреть подробности и забронировать место.",
-            parse_mode: "HTML",
-            reply_markup: {
-              inline_keyboard: [[{ text: "🚀 Открыть поездку", web_app: { url: `${MINI_APP_URL}/ride/${rideId}` } }]]
+          try {
+            const rideUrl = `${SUPABASE_URL}/rest/v1/rides?id=eq.${rideId}&select=*`;
+            const rideResponse = await fetch(rideUrl, {
+              headers: {
+                'apikey': SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+              }
+            });
+            const rideDataArray = await rideResponse.json();
+            const ride = rideDataArray[0];
+
+            if (ride) {
+              const dateStr = ride.date;
+              const timeStr = ride.time ? ride.time.substring(0, 5) : '';
+              let msg = "";
+              if (ride.is_passenger_entry) {
+                msg = `🙋 <b>ПАССАЖИР ИЩЕТ ПОЕЗДКУ</b>\n\n📍 <b>Маршрут:</b> ${ride.from_city} ➡ ${ride.to_city}\n🗓 <b>Дата:</b> ${dateStr}\n⏰ <b>Время:</b> ${timeStr}`;
+              } else {
+                const deliveryText = ride.allows_delivery ? '\n📦 <b>Беру посылки</b>' : '';
+                msg = `🚗 <b>ВОДИТЕЛЬ ИЩЕТ ПАССАЖИРОВ</b>\n\n📍 <b>Маршрут:</b> ${ride.from_city} ➡ ${ride.to_city}\n🗓 <b>Дата:</b> ${dateStr}\n⏰ <b>Время:</b> ${timeStr}\n💺 <b>Свободных мест:</b> ${ride.seats}${deliveryText}`;
+              }
+
+              return res.status(200).json({
+                method: "sendMessage",
+                chat_id: chatId,
+                text: msg,
+                parse_mode: "HTML",
+                reply_markup: {
+                  inline_keyboard: [[{ text: "🚀 Открыть в приложении", web_app: { url: `${MINI_APP_URL}/ride/${rideId}` } }]]
+                }
+              });
             }
-          });
+          } catch (e) {
+            console.error('Fetch ride error:', e);
+          }
         }
+
         if (param.startsWith('bus_')) {
           const busId = param.replace('bus_', '');
-          return res.status(200).json({
-            method: "sendMessage",
-            chat_id: chatId,
-            text: "🚌 <b>Найдена автобусная поездка!</b>\n\nНажмите кнопку ниже для просмотра деталей.",
-            parse_mode: "HTML",
-            reply_markup: {
-              inline_keyboard: [[{ text: "🚀 Открыть билет", web_app: { url: `${MINI_APP_URL}/bus-ticket/${busId}` } }]]
+          try {
+            const busUrl = `${SUPABASE_URL}/rest/v1/bus_tickets?id=eq.${busId}&select=*`;
+            const busResponse = await fetch(busUrl, {
+              headers: {
+                'apikey': SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+              }
+            });
+            const busDataArray = await busResponse.json();
+            const bus = busDataArray[0];
+
+            if (bus) {
+              const dateStr = bus.departure_date;
+              const timeStr = bus.departure_time ? bus.departure_time.substring(0, 5) : '';
+              const stops = (typeof bus.intermediate_stops === 'string' ? JSON.parse(bus.intermediate_stops || '[]') : (bus.intermediate_stops || []));
+              const stopsText = stops.length > 0 ? `\n🛑 <b>Остановки:</b> ${stops.map(s => s.city).join(', ')}` : '';
+              
+              const msg = `🚌 <b>АВТОБУСНЫЙ РЕЙС</b>\n\n📍 <b>Маршрут:</b> ${bus.from_city} ➡ ${bus.to_city}${stopsText}\n🗓 <b>Дата:</b> ${dateStr}\n⏰ <b>Время:</b> ${timeStr}\n💰 <b>Цена:</b> ${bus.price} сом\n🏢 <b>Перевозчик:</b> ${bus.transport_company}`;
+
+              return res.status(200).json({
+                method: "sendMessage",
+                chat_id: chatId,
+                text: msg,
+                parse_mode: "HTML",
+                reply_markup: {
+                  inline_keyboard: [[{ text: "🚀 Открыть билет", web_app: { url: `${MINI_APP_URL}/bus-ticket/${busId}` } }]]
+                }
+              });
             }
-          });
+          } catch (e) {
+            console.error('Fetch bus error:', e);
+          }
         }
       }
 
