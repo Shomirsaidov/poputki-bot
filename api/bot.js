@@ -108,9 +108,40 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
-    // 2. Private chat logic -> Send Mini App Button
+    // 2. Private chat logic -> Handle /start or Send Mini App Button
     if (chatType === 'private' && message) {
-      const text = "Poputki.online – это современное приложение, которое делает междугородние поездки проще и выгоднее.\nТы еще ждешь?\n👇ЖМИ👇";
+      const text = message.text || "";
+      
+      // Handle deep links: /start ride_123 or /start bus_456
+      if (text.startsWith('/start ')) {
+        const param = text.split(' ')[1];
+        if (param.startsWith('ride_')) {
+          const rideId = param.replace('ride_', '');
+          return res.status(200).json({
+            method: "sendMessage",
+            chat_id: chatId,
+            text: "🔍 <b>Найдена поездка!</b>\n\nНажмите кнопку ниже, чтобы посмотреть подробности и забронировать место.",
+            parse_mode: "HTML",
+            reply_markup: {
+              inline_keyboard: [[{ text: "🚀 Открыть поездку", web_app: { url: `${MINI_APP_URL}/ride/${rideId}` } }]]
+            }
+          });
+        }
+        if (param.startsWith('bus_')) {
+          const busId = param.replace('bus_', '');
+          return res.status(200).json({
+            method: "sendMessage",
+            chat_id: chatId,
+            text: "🚌 <b>Найдена автобусная поездка!</b>\n\nНажмите кнопку ниже для просмотра деталей.",
+            parse_mode: "HTML",
+            reply_markup: {
+              inline_keyboard: [[{ text: "🚀 Открыть билет", web_app: { url: `${MINI_APP_URL}/bus-ticket/${busId}` } }]]
+            }
+          });
+        }
+      }
+
+      const welcomeText = "Poputki.online – это современное приложение, которое делает междугородние поездки проще и выгоднее.\nТы еще ждешь?\n👇ЖМИ👇";
       const replyMarkup = {
         inline_keyboard: [[{ text: "Открыть приложение", web_app: { url: `${MINI_APP_URL}/search` } }]]
       };
@@ -145,7 +176,7 @@ export default async function handler(req, res) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           chat_id: chatId,
-          text,
+          text: welcomeText,
           reply_markup: replyMarkup
         })
       });
