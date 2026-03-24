@@ -49,7 +49,7 @@ export default async function handler(req, res) {
     const update = req.body;
 
     // Support multiple update types for group synchronization
-    const message = update.message || update.edited_message;
+    const message = update.message || update.edited_message || update.channel_post || update.edited_channel_post;
     const memberUpdate = update.my_chat_member || update.chat_member;
 
     if (!message && !memberUpdate) {
@@ -64,7 +64,7 @@ export default async function handler(req, res) {
 
     // Helper: Sync Group to Supabase
     const syncGroup = async () => {
-      if (chatType === 'group' || chatType === 'supergroup') {
+      if (chatType === 'group' || chatType === 'supergroup' || chatType === 'channel') {
         const syncUrl = `${SUPABASE_URL}/rest/v1/telegram_groups?on_conflict=chat_id`;
         const resSync = await fetch(syncUrl, {
           method: 'POST',
@@ -84,8 +84,8 @@ export default async function handler(req, res) {
       return null;
     };
 
-    // 1. Group / Supergroup logic -> Save to Supabase
-    if (chatType === 'group' || chatType === 'supergroup') {
+    // 1. Group / Supergroup / Channel logic -> Save to Supabase
+    if (chatType === 'group' || chatType === 'supergroup' || chatType === 'channel') {
       const syncRes = await syncGroup();
 
       // Handle /test command for verification
