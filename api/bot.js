@@ -25,15 +25,21 @@ export default async function handler(req, res) {
         const meRes = await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/getMe`);
         const me = await meRes.json();
         
-        return res.status(200).json({
-          ok: true,
-          bot: me.result,
-          webhook: webhookInfo.result,
-          config: {
-            MINI_APP_URL,
-            SUPABASE_URL
-          }
-        });
+          return res.status(200).json({
+            ok: true,
+            bot: me.result,
+            webhook: {
+              url: webhookInfo.result.url,
+              pending_update_count: webhookInfo.result.pending_update_count,
+              last_error_date: webhookInfo.result.last_error_date,
+              last_error_message: webhookInfo.result.last_error_message,
+              last_synchronization_error_date: webhookInfo.result.last_synchronization_error_date
+            },
+            config: {
+              MINI_APP_URL,
+              SUPABASE_URL
+            }
+          });
       } catch (err) {
         return res.status(500).json({ ok: false, error: err.message });
       }
