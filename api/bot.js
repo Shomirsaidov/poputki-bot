@@ -27,6 +27,7 @@ export default async function handler(req, res) {
         
           return res.status(200).json({
             ok: true,
+            version: "2.1.0",
             bot: me.result,
             webhook: {
               url: webhookInfo.result.url,
