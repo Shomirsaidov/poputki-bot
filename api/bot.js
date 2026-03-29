@@ -25,22 +25,32 @@ export default async function handler(req, res) {
         const meRes = await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/getMe`);
         const me = await meRes.json();
         
-          return res.status(200).json({
-            ok: true,
-            version: "2.1.0",
-            bot: me.result,
-            webhook: {
-              url: webhookInfo.result.url,
-              pending_update_count: webhookInfo.result.pending_update_count,
-              last_error_date: webhookInfo.result.last_error_date,
-              last_error_message: webhookInfo.result.last_error_message,
-              last_synchronization_error_date: webhookInfo.result.last_synchronization_error_date
-            },
-            config: {
-              MINI_APP_URL,
-              SUPABASE_URL
-            }
+        let selfHealingStatus = "Healthy";
+        if (!webhookInfo.result.url) {
+          log("Webhook missing! Attempting self-healing...");
+          const webhookUrl = `https://${req.headers.host}/api/bot`;
+          await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/setWebhook`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              url: webhookUrl,
+              allowed_updates: ["message", "edited_message", "callback_query", "my_chat_member", "chat_member"]
+            })
           });
+          selfHealingStatus = `Self-healed to ${webhookUrl}`;
+        }
+
+        return res.status(200).json({
+          ok: true,
+          version: "2.2.0",
+          self_healing: selfHealingStatus,
+          bot: me.result,
+          webhook: webhookInfo.result,
+          config: {
+            MINI_APP_URL,
+            SUPABASE_URL
+          }
+        });
       } catch (err) {
         return res.status(500).json({ ok: false, error: err.message });
       }
