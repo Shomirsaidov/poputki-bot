@@ -136,31 +136,40 @@ export default async function handler(req, res) {
     }
 
     // Extract chat details
-    const chat = (message || memberUpdate).chat;
+    const chat = (message || memberUpdate || (callbackQuery ? callbackQuery.message : {})).chat;
+    if (!chat || !chat.id) return res.status(200).json({ ok: true });
+
     const chatId = chat.id;
     const chatType = chat.type;
     const chatTitle = chat.title || chat.first_name || 'Personal Chat';
 
-    // Helper: Sync Group to Supabase
-    const syncGroup = async () => {
-      if (chatType === 'group' || chatType === 'supergroup' || chatType === 'channel') {
-        const syncUrl = `${SUPABASE_URL}/rest/v1/telegram_groups?on_conflict=chat_id`;
-        const resSync = await fetch(syncUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': SUPABASE_ANON_KEY,
-            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-            'Prefer': 'resolution=merge-duplicates'
-          },
-          body: JSON.stringify({
-            chat_id: chatId.toString(),
-            title: chatTitle
-          })
+    // Helper: Escape HTML
+    const escapeHtml = (unsafe) => {
+      if (!unsafe || typeof unsafe !== 'string') return unsafe;
+      return unsafe
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    };
+
+    // Helper: Secure sendMessage with logging
+    const safeSendMessage = async (payload) => {
+      try {
+        log(`Sending message to ${payload.chat_id}:`, payload.text);
+        const response = await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
         });
-        return resSync;
+        const result = await response.json();
+        log(`Telegram API Result for ${payload.chat_id}:`, result);
+        return result;
+      } catch (e) {
+        log(`Telegram API Error for ${payload.chat_id}:`, e.message);
+        return null;
       }
-      return null;
     };
 
     // 1. Group / Supergroup / Channel logic -> Save to Supabase
@@ -177,21 +186,20 @@ export default async function handler(req, res) {
           const errText = syncRes ? await syncRes.text() : "Sync not triggered";
           statusMsg += `❌ FAILED. ${errText}`;
         }
-
-        await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/sendMessage`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chat_id: chatId, text: statusMsg })
-        });
+        await safeSendMessage({ chat_id: chatId, text: statusMsg });
       }
-
       return res.status(200).json({ ok: true });
     }
 
     // 2. Private chat logic -> Handle /start or Send Mini App Button
-    if (chatType === 'private' && message) {
-      const text = message.text || "";
-      log(`Private message from ${chatId}: ${text}`);
+    if (chatType === 'private' && (message || callbackQuery)) {
+      const text = message ? (message.text || "") : "";
+      log(`Private event from ${chatId}: ${text || '[no text]'}`);
+
+      if (text === '/ping') {
+        await safeSendMessage({ chat_id: chatId, text: "Pong! 🏓 Bot is active." });
+        return res.status(200).json({ ok: true });
+      }
       
       // Handle /start command (both with and without params)
       if (text.startsWith('/start')) {
@@ -212,9 +220,7 @@ export default async function handler(req, res) {
                 }
               });
               
-              if (!rideResponse.ok) {
-                throw new Error(`Supabase error: ${rideResponse.status} ${rideResponse.statusText}`);
-              }
+              if (!rideResponse.ok) throw new Error(`Supabase error: ${rideResponse.status}`);
 
               const rideDataArray = await rideResponse.json();
               const ride = Array.isArray(rideDataArray) ? rideDataArray[0] : null;
@@ -223,29 +229,25 @@ export default async function handler(req, res) {
                 const dateStr = ride.date;
                 const timeStr = ride.time ? ride.time.substring(0, 5) : '';
                 let msg = "";
+                const fromCity = escapeHtml(ride.from_city);
+                const toCity = escapeHtml(ride.to_city);
+
                 if (ride.is_passenger_entry) {
-                  msg = `🙋 <b>ПАССАЖИР ИЩЕТ ПОЕЗДКУ</b>\n\n📍 <b>Маршрут:</b> ${ride.from_city} ➡ ${ride.to_city}\n🗓 <b>Дата:</b> ${dateStr}\n⏰ <b>Время:</b> ${timeStr}`;
+                  msg = `🙋 <b>ПАССАЖИР ИЩЕТ ПОЕЗДКУ</b>\n\n📍 <b>Маршрут:</b> ${fromCity} ➡ ${toCity}\n🗓 <b>Дата:</b> ${dateStr}\n⏰ <b>Время:</b> ${timeStr}`;
                 } else {
                   const deliveryText = ride.allows_delivery ? '\n📦 <b>Беру посылки</b>' : '';
-                  msg = `🚗 <b>ВОДИТЕЛЬ ИЩЕТ ПАССАЖИРОВ</b>\n\n📍 <b>Маршрут:</b> ${ride.from_city} ➡ ${ride.to_city}\n🗓 <b>Дата:</b> ${dateStr}\n⏰ <b>Время:</b> ${timeStr}\n💺 <b>Свободных мест:</b> ${ride.seats}${deliveryText}`;
+                  msg = `🚗 <b>ВОДИТЕЛЬ ИЩЕТ ПАССАЖИРОВ</b>\n\n📍 <b>Маршрут:</b> ${fromCity} ➡ ${toCity}\n🗓 <b>Дата:</b> ${dateStr}\n⏰ <b>Время:</b> ${timeStr}\n💺 <b>Свободных мест:</b> ${ride.seats}${deliveryText}`;
                 }
 
-                const sendRes = await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/sendMessage`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    chat_id: chatId,
-                    text: msg,
-                    parse_mode: "HTML",
-                    reply_markup: {
-                      inline_keyboard: [[{ text: "🚀 Открыть в приложении", web_app: { url: `${MINI_APP_URL}/ride/${rideId}` } }]]
-                    }
-                  })
+                await safeSendMessage({
+                  chat_id: chatId,
+                  text: msg,
+                  parse_mode: "HTML",
+                  reply_markup: {
+                    inline_keyboard: [[{ text: "🚀 Открыть в приложении", web_app: { url: `${MINI_APP_URL}/ride/${rideId}` } }]]
+                  }
                 });
-                log(`Deep link ride response status: ${sendRes.status}`);
                 return res.status(200).json({ ok: true });
-              } else {
-                log(`Ride not found for ID: ${rideId}`);
               }
             } catch (e) {
               log('Fetch ride error:', e);
@@ -263,9 +265,7 @@ export default async function handler(req, res) {
                 }
               });
 
-              if (!busResponse.ok) {
-                throw new Error(`Supabase error: ${busResponse.status} ${busResponse.statusText}`);
-              }
+              if (!busResponse.ok) throw new Error(`Supabase error: ${busResponse.status}`);
 
               const busDataArray = await busResponse.json();
               const bus = Array.isArray(busDataArray) ? busDataArray[0] : null;
@@ -273,27 +273,24 @@ export default async function handler(req, res) {
               if (bus) {
                 const dateStr = bus.departure_date;
                 const timeStr = bus.departure_time ? bus.departure_time.substring(0, 5) : '';
-                const stops = (typeof bus.intermediate_stops === 'string' ? JSON.parse(bus.intermediate_stops || '[]') : (bus.intermediate_stops || []));
-                const stopsText = stops.length > 0 ? `\n🛑 <b>Остановки:</b> ${stops.map(s => s.city).join(', ')}` : '';
+                const fromCity = escapeHtml(bus.from_city);
+                const toCity = escapeHtml(bus.to_city);
+                const company = escapeHtml(bus.transport_company);
                 
-                const msg = `🚌 <b>АВТОБУСНЫЙ РЕЙС</b>\n\n📍 <b>Маршрут:</b> ${bus.from_city} ➡ ${bus.to_city}${stopsText}\n🗓 <b>Дата:</b> ${dateStr}\n⏰ <b>Время:</b> ${timeStr}\n💰 <b>Цена:</b> ${bus.price} сом\n🏢 <b>Перевозчик:</b> ${bus.transport_company}`;
+                const stops = (typeof bus.intermediate_stops === 'string' ? JSON.parse(bus.intermediate_stops || '[]') : (bus.intermediate_stops || []));
+                const stopsText = stops.length > 0 ? `\n🛑 <b>Остановки:</b> ${stops.map(s => escapeHtml(s.city)).join(', ')}` : '';
+                
+                const msg = `🚌 <b>АВТОБУСНЫЙ РЕЙС</b>\n\n📍 <b>Маршрут:</b> ${fromCity} ➡ ${toCity}${stopsText}\n🗓 <b>Дата:</b> ${dateStr}\n⏰ <b>Время:</b> ${timeStr}\n💰 <b>Цена:</b> ${bus.price} сом\n🏢 <b>Перевозчик:</b> ${company}`;
 
-                const sendRes = await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/sendMessage`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    chat_id: chatId,
-                    text: msg,
-                    parse_mode: "HTML",
-                    reply_markup: {
-                      inline_keyboard: [[{ text: "🚀 Открыть билет", web_app: { url: `${MINI_APP_URL}/bus-ticket/${busId}` } }]]
-                    }
-                  })
+                await safeSendMessage({
+                  chat_id: chatId,
+                  text: msg,
+                  parse_mode: "HTML",
+                  reply_markup: {
+                    inline_keyboard: [[{ text: "🚀 Открыть билет", web_app: { url: `${MINI_APP_URL}/bus-ticket/${busId}` } }]]
+                  }
                 });
-                log(`Deep link bus response status: ${sendRes.status}`);
                 return res.status(200).json({ ok: true });
-              } else {
-                log(`Bus not found for ID: ${busId}`);
               }
             } catch (e) {
               log('Fetch bus error:', e);
@@ -302,50 +299,31 @@ export default async function handler(req, res) {
         }
       }
 
-      // Default Welcome Message (Fallback for regular text or empty /start)
+      // Default Welcome Message (Fallback)
       const welcomeText = "Poputki.online – это современное приложение, которое делает междугородние поездки проще и выгоднее.\nТы еще ждешь?\n👇ЖМИ👇";
-      const replyMarkup = {
-        inline_keyboard: [[{ text: "Открыть приложение", web_app: { url: `${MINI_APP_URL}/search` } }]]
-      };
-
+      
       const persistentMenu = {
         keyboard: [
-          [
-            { text: "Создать поездку", web_app: { url: `${MINI_APP_URL}/create` } },
-            { text: "Найти поездку", web_app: { url: `${MINI_APP_URL}/search` } }
-          ],
-          [
-            { text: "Мои поездки", web_app: { url: `${MINI_APP_URL}/my-rides` } },
-            { text: "Профиль", web_app: { url: `${MINI_APP_URL}/profile` } }
-          ]
+          [{ text: "Создать поездку", web_app: { url: `${MINI_APP_URL}/create` } }, { text: "Найти поездку", web_app: { url: `${MINI_APP_URL}/search` } }],
+          [{ text: "Мои поездки", web_app: { url: `${MINI_APP_URL}/my-rides` } }, { text: "Профиль", web_app: { url: `${MINI_APP_URL}/profile` } }]
         ],
         resize_keyboard: true,
         is_persistent: true
       };
 
-      log(`Sending welcome message to ${chatId}`);
-
-      const res1 = await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: "Используйте меню ниже для быстрого доступа к функциям или нажмите кнопку:",
-          reply_markup: persistentMenu
-        })
+      await safeSendMessage({
+        chat_id: chatId,
+        text: "Используйте меню ниже для быстрого доступа к функциям или нажмите кнопку:",
+        reply_markup: persistentMenu
       });
-      log(`Greeting 1 status: ${res1.status}`);
 
-      const res2 = await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: welcomeText,
-          reply_markup: replyMarkup
-        })
+      await safeSendMessage({
+        chat_id: chatId,
+        text: welcomeText,
+        reply_markup: {
+          inline_keyboard: [[{ text: "Открыть приложение", web_app: { url: `${MINI_APP_URL}/search` } }]]
+        }
       });
-      log(`Greeting 2 status: ${res2.status}`);
     }
 
     return res.status(200).json({ ok: true });
