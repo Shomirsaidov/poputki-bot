@@ -172,86 +172,116 @@ export default async function handler(req, res) {
       const text = message.text || "";
       log(`Private message from ${chatId}: ${text}`);
       
-      // Handle deep links: /start ride_123 or /start bus_456
-      if (text.startsWith('/start ')) {
-        const param = text.split(' ')[1];
-        if (param.startsWith('ride_')) {
-          const rideId = param.replace('ride_', '');
-          try {
-            const rideUrl = `${SUPABASE_URL}/rest/v1/rides?id=eq.${rideId}&select=*`;
-            const rideResponse = await fetch(rideUrl, {
-              headers: {
-                'apikey': SUPABASE_ANON_KEY,
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-              }
-            });
-            const rideDataArray = await rideResponse.json();
-            const ride = rideDataArray[0];
+      // Handle /start command (both with and without params)
+      if (text.startsWith('/start')) {
+        const parts = text.split(' ');
+        const param = parts.length > 1 ? parts[1] : null;
 
-            if (ride) {
-              const dateStr = ride.date;
-              const timeStr = ride.time ? ride.time.substring(0, 5) : '';
-              let msg = "";
-              if (ride.is_passenger_entry) {
-                msg = `🙋 <b>ПАССАЖИР ИЩЕТ ПОЕЗДКУ</b>\n\n📍 <b>Маршрут:</b> ${ride.from_city} ➡ ${ride.to_city}\n🗓 <b>Дата:</b> ${dateStr}\n⏰ <b>Время:</b> ${timeStr}`;
-              } else {
-                const deliveryText = ride.allows_delivery ? '\n📦 <b>Беру посылки</b>' : '';
-                msg = `🚗 <b>ВОДИТЕЛЬ ИЩЕТ ПАССАЖИРОВ</b>\n\n📍 <b>Маршрут:</b> ${ride.from_city} ➡ ${ride.to_city}\n🗓 <b>Дата:</b> ${dateStr}\n⏰ <b>Время:</b> ${timeStr}\n💺 <b>Свободных мест:</b> ${ride.seats}${deliveryText}`;
-              }
-
-              return res.status(200).json({
-                method: "sendMessage",
-                chat_id: chatId,
-                text: msg,
-                parse_mode: "HTML",
-                reply_markup: {
-                  inline_keyboard: [[{ text: "🚀 Открыть в приложении", web_app: { url: `${MINI_APP_URL}/ride/${rideId}` } }]]
+        if (param) {
+          log(`Handling deep link with param: ${param}`);
+          
+          if (param.startsWith('ride_')) {
+            const rideId = param.replace('ride_', '');
+            try {
+              const rideUrl = `${SUPABASE_URL}/rest/v1/rides?id=eq.${rideId}&select=*`;
+              const rideResponse = await fetch(rideUrl, {
+                headers: {
+                  'apikey': SUPABASE_ANON_KEY,
+                  'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
                 }
               });
-            }
-          } catch (e) {
-            log('Fetch ride error:', e);
-          }
-        }
-
-        if (param.startsWith('bus_')) {
-          const busId = param.replace('bus_', '');
-          try {
-            const busUrl = `${SUPABASE_URL}/rest/v1/bus_tickets?id=eq.${busId}&select=*`;
-            const busResponse = await fetch(busUrl, {
-              headers: {
-                'apikey': SUPABASE_ANON_KEY,
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-              }
-            });
-            const busDataArray = await busResponse.json();
-            const bus = busDataArray[0];
-
-            if (bus) {
-              const dateStr = bus.departure_date;
-              const timeStr = bus.departure_time ? bus.departure_time.substring(0, 5) : '';
-              const stops = (typeof bus.intermediate_stops === 'string' ? JSON.parse(bus.intermediate_stops || '[]') : (bus.intermediate_stops || []));
-              const stopsText = stops.length > 0 ? `\n🛑 <b>Остановки:</b> ${stops.map(s => s.city).join(', ')}` : '';
               
-              const msg = `🚌 <b>АВТОБУСНЫЙ РЕЙС</b>\n\n📍 <b>Маршрут:</b> ${bus.from_city} ➡ ${bus.to_city}${stopsText}\n🗓 <b>Дата:</b> ${dateStr}\n⏰ <b>Время:</b> ${timeStr}\n💰 <b>Цена:</b> ${bus.price} сом\n🏢 <b>Перевозчик:</b> ${bus.transport_company}`;
+              if (!rideResponse.ok) {
+                throw new Error(`Supabase error: ${rideResponse.status} ${rideResponse.statusText}`);
+              }
 
-              return res.status(200).json({
-                method: "sendMessage",
-                chat_id: chatId,
-                text: msg,
-                parse_mode: "HTML",
-                reply_markup: {
-                  inline_keyboard: [[{ text: "🚀 Открыть билет", web_app: { url: `${MINI_APP_URL}/bus-ticket/${busId}` } }]]
+              const rideDataArray = await rideResponse.json();
+              const ride = Array.isArray(rideDataArray) ? rideDataArray[0] : null;
+
+              if (ride) {
+                const dateStr = ride.date;
+                const timeStr = ride.time ? ride.time.substring(0, 5) : '';
+                let msg = "";
+                if (ride.is_passenger_entry) {
+                  msg = `🙋 <b>ПАССАЖИР ИЩЕТ ПОЕЗДКУ</b>\n\n📍 <b>Маршрут:</b> ${ride.from_city} ➡ ${ride.to_city}\n🗓 <b>Дата:</b> ${dateStr}\n⏰ <b>Время:</b> ${timeStr}`;
+                } else {
+                  const deliveryText = ride.allows_delivery ? '\n📦 <b>Беру посылки</b>' : '';
+                  msg = `🚗 <b>ВОДИТЕЛЬ ИЩЕТ ПАССАЖИРОВ</b>\n\n📍 <b>Маршрут:</b> ${ride.from_city} ➡ ${ride.to_city}\n🗓 <b>Дата:</b> ${dateStr}\n⏰ <b>Время:</b> ${timeStr}\n💺 <b>Свободных мест:</b> ${ride.seats}${deliveryText}`;
+                }
+
+                const sendRes = await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/sendMessage`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    chat_id: chatId,
+                    text: msg,
+                    parse_mode: "HTML",
+                    reply_markup: {
+                      inline_keyboard: [[{ text: "🚀 Открыть в приложении", web_app: { url: `${MINI_APP_URL}/ride/${rideId}` } }]]
+                    }
+                  })
+                });
+                log(`Deep link ride response status: ${sendRes.status}`);
+                return res.status(200).json({ ok: true });
+              } else {
+                log(`Ride not found for ID: ${rideId}`);
+              }
+            } catch (e) {
+              log('Fetch ride error:', e);
+            }
+          }
+
+          if (param.startsWith('bus_')) {
+            const busId = param.replace('bus_', '');
+            try {
+              const busUrl = `${SUPABASE_URL}/rest/v1/bus_tickets?id=eq.${busId}&select=*`;
+              const busResponse = await fetch(busUrl, {
+                headers: {
+                  'apikey': SUPABASE_ANON_KEY,
+                  'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
                 }
               });
+
+              if (!busResponse.ok) {
+                throw new Error(`Supabase error: ${busResponse.status} ${busResponse.statusText}`);
+              }
+
+              const busDataArray = await busResponse.json();
+              const bus = Array.isArray(busDataArray) ? busDataArray[0] : null;
+
+              if (bus) {
+                const dateStr = bus.departure_date;
+                const timeStr = bus.departure_time ? bus.departure_time.substring(0, 5) : '';
+                const stops = (typeof bus.intermediate_stops === 'string' ? JSON.parse(bus.intermediate_stops || '[]') : (bus.intermediate_stops || []));
+                const stopsText = stops.length > 0 ? `\n🛑 <b>Остановки:</b> ${stops.map(s => s.city).join(', ')}` : '';
+                
+                const msg = `🚌 <b>АВТОБУСНЫЙ РЕЙС</b>\n\n📍 <b>Маршрут:</b> ${bus.from_city} ➡ ${bus.to_city}${stopsText}\n🗓 <b>Дата:</b> ${dateStr}\n⏰ <b>Время:</b> ${timeStr}\n💰 <b>Цена:</b> ${bus.price} сом\n🏢 <b>Перевозчик:</b> ${bus.transport_company}`;
+
+                const sendRes = await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/sendMessage`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    chat_id: chatId,
+                    text: msg,
+                    parse_mode: "HTML",
+                    reply_markup: {
+                      inline_keyboard: [[{ text: "🚀 Открыть билет", web_app: { url: `${MINI_APP_URL}/bus-ticket/${busId}` } }]]
+                    }
+                  })
+                });
+                log(`Deep link bus response status: ${sendRes.status}`);
+                return res.status(200).json({ ok: true });
+              } else {
+                log(`Bus not found for ID: ${busId}`);
+              }
+            } catch (e) {
+              log('Fetch bus error:', e);
             }
-          } catch (e) {
-            log('Fetch bus error:', e);
           }
         }
       }
 
-      // Default Welcome Message
+      // Default Welcome Message (Fallback for regular text or empty /start)
       const welcomeText = "Poputki.online – это современное приложение, которое делает междугородние поездки проще и выгоднее.\nТы еще ждешь?\n👇ЖМИ👇";
       const replyMarkup = {
         inline_keyboard: [[{ text: "Открыть приложение", web_app: { url: `${MINI_APP_URL}/search` } }]]
@@ -269,11 +299,12 @@ export default async function handler(req, res) {
           ]
         ],
         resize_keyboard: true,
-        persistent: true
+        is_persistent: true
       };
 
-      // Use a batch to reduce latency if possible, but for simplicity we use two sends
-      await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/sendMessage`, {
+      log(`Sending welcome message to ${chatId}`);
+
+      const res1 = await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -282,8 +313,9 @@ export default async function handler(req, res) {
           reply_markup: persistentMenu
         })
       });
+      log(`Greeting 1 status: ${res1.status}`);
 
-      await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/sendMessage`, {
+      const res2 = await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -292,6 +324,7 @@ export default async function handler(req, res) {
           reply_markup: replyMarkup
         })
       });
+      log(`Greeting 2 status: ${res2.status}`);
     }
 
     return res.status(200).json({ ok: true });
