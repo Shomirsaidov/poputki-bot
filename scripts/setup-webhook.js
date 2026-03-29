@@ -56,6 +56,10 @@ async function main() {
                 allowed_updates: ["message", "edited_message", "callback_query", "my_chat_member", "chat_member"]
             });
             console.log('Set Webhook Result:', JSON.stringify(res, null, 2));
+            
+            console.log('Verifying immediately...');
+            const info = await callTelegram('getWebhookInfo');
+            console.log('Webhook Info after set:', JSON.stringify(info.result, null, 2));
         } else if (command === 'delete') {
             const res = await callTelegram('deleteWebhook');
             console.log('Delete Webhook Result:', JSON.stringify(res, null, 2));

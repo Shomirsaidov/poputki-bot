@@ -81,13 +81,17 @@ export default async function handler(req, res) {
     }
   }
 
-  if (req.method !== "POST") {
+  if (req.method === "HEAD") {
+    return res.status(200).end();
+  }
+
+  if (req.method !== "POST" && req.method !== "GET") {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
   }
 
   try {
     const update = req.body;
-    log('Incoming update:', update);
+    log(`Incoming ${req.method} update:`, update);
 
     // Support multiple update types
     const message = update.message || update.edited_message || update.channel_post || update.edited_channel_post;
