@@ -20,16 +20,24 @@ export default async function handler(req, res) {
 
     if (status) {
       try {
+        log("Diagnostic requested. Fetching info...");
         const webhookInfoRes = await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/getWebhookInfo`);
         const webhookInfo = await webhookInfoRes.json();
         const meRes = await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/getMe`);
         const me = await meRes.json();
         
+        if (!webhookInfo.ok) {
+          return res.status(200).json({ ok: false, error: "Telegram getWebhookInfo failed", details: webhookInfo });
+        }
+        if (!me.ok) {
+          return res.status(200).json({ ok: false, error: "Telegram getMe failed", details: me });
+        }
+
         let selfHealingStatus = "Healthy";
-        if (!webhookInfo.result.url) {
+        if (webhookInfo.result && !webhookInfo.result.url) {
           log("Webhook missing! Attempting self-healing...");
           const webhookUrl = `https://${req.headers.host}/api/bot`;
-          await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/setWebhook`, {
+          const setRes = await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/setWebhook`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -37,12 +45,13 @@ export default async function handler(req, res) {
               allowed_updates: ["message", "edited_message", "callback_query", "my_chat_member", "chat_member"]
             })
           });
-          selfHealingStatus = `Self-healed to ${webhookUrl}`;
+          const setResult = await setRes.json();
+          selfHealingStatus = `Self-healed result: ${JSON.stringify(setResult)}`;
         }
 
         return res.status(200).json({
           ok: true,
-          version: "2.2.0",
+          version: "4.0.0",
           self_healing: selfHealingStatus,
           bot: me.result,
           webhook: webhookInfo.result,
@@ -52,7 +61,7 @@ export default async function handler(req, res) {
           }
         });
       } catch (err) {
-        return res.status(500).json({ ok: false, error: err.message });
+        return res.status(500).json({ ok: false, error: err.message, stack: err.stack });
       }
     }
 
