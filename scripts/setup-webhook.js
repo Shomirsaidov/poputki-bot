@@ -1,7 +1,7 @@
 // scripts/setup-webhook.js
 const https = require('https');
 
-const BOT_TOKEN = process.env.BOT_TOKEN || '8669833278:AAFHxzU9jZUZIWVrHdogUsYrkQmd_F05MZA';
+const BOT_TOKEN = '8669833278:AAE2RYNpP530Nt1bDmXnbcNSg4qL_cKRNQA';
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
 const args = process.argv.slice(2);

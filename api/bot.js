@@ -4,7 +4,7 @@ const TELEGRAM_API = "https://api.telegram.org";
 
 export default async function handler(req, res) {
   // Hardcoded Credentials (Overriding Vercel Env Vars to guarantee connection)
-  const BOT_TOKEN = process.env.BOT_TOKEN || '8669833278:AAFHxzU9jZUZIWVrHdogUsYrkQmd_F05MZA';
+  const BOT_TOKEN = '8669833278:AAE2RYNpP530Nt1bDmXnbcNSg4qL_cKRNQA';
   const MINI_APP_URL = process.env.MINI_APP_URL || 'https://poputki.online';
   const SUPABASE_URL = 'https://xzvtjcqwmuezxyeerkki.supabase.co';
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh6dnRqY3F3bXVlenh5ZWVya2tpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMxMjA0MTEsImV4cCI6MjA4ODY5NjQxMX0.My0BKDF4tC9egh1nZbs9G0U7KKvwJixIuo71wuPPFDo';
