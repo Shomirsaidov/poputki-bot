@@ -1,6 +1,5 @@
-// api/bot.js  (for Vercel /api/bot endpoint)
-
 const TELEGRAM_API = "https://api.telegram.org";
+const syncedGroups = new Set();
 
 export default async function handler(req, res) {
   // Hardcoded Credentials (Overriding Vercel Env Vars to guarantee connection)
@@ -193,6 +192,10 @@ JSON Keys:
       
       if (!parsed || !parsed.from_city || !parsed.to_city || !parsed.phone || !parsed.time) {
         log('[Scraper] Message is not a valid ride announcement or is missing required fields.');
+        await safeSendMessage({
+          chat_id: msg.chat.id,
+          text: `🔍 [Scraper Debug] Rejected: Message is not a ride announcement or is missing required fields.\nParsed data: ${JSON.stringify(parsed)}`
+        });
         // Clear reaction if it's not a ride announcement
         await safeSetReaction(msg.chat.id, msg.message_id, '');
         return;
@@ -206,6 +209,10 @@ JSON Keys:
 
       if (!fromCityNormalized || !toCityNormalized) {
         log(`[Scraper] Rejected: Normalized cities not found. Raw from: "${parsed.from_city}", to: "${parsed.to_city}"`);
+        await safeSendMessage({
+          chat_id: msg.chat.id,
+          text: `🔍 [Scraper Debug] Rejected: Cities could not be normalized to supported regions.\nParsed Origin: "${parsed.from_city}"\nParsed Destination: "${parsed.to_city}"`
+        });
         // Clear reaction if cities not found
         await safeSetReaction(msg.chat.id, msg.message_id, '');
         return;
@@ -221,50 +228,7 @@ JSON Keys:
       }
 
       log('[Scraper] Resolving AI_scraper superuser...');
-      let scraperUserId = null;
-      const scraperQueryUrl = `${SUPABASE_URL}/rest/v1/users?phone=eq.%2B992000000000&select=id`;
-      const scraperRes = await fetch(scraperQueryUrl, {
-        headers: {
-          'apikey': SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-        }
-      });
-      if (scraperRes.ok) {
-        const scraperUsers = await scraperRes.json();
-        if (scraperUsers && scraperUsers.length > 0) {
-          scraperUserId = scraperUsers[0].id;
-        }
-      }
-
-      if (!scraperUserId) {
-        log('[Scraper] AI_scraper superuser not found, creating dynamic instance...');
-        const createScraperRes = await fetch(`${SUPABASE_URL}/rest/v1/users`, {
-          method: 'POST',
-          headers: {
-            'apikey': SUPABASE_ANON_KEY,
-            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-            'Content-Type': 'application/json',
-            'Prefer': 'return=representation'
-          },
-          body: JSON.stringify({
-            phone: '+992000000000',
-            name: 'AI_scraper',
-            role: 'driver',
-            rating: 5.0,
-            telegram_id: 888888888
-          })
-        });
-        if (createScraperRes.ok) {
-          const newScrapers = await createScraperRes.json();
-          if (newScrapers && newScrapers.length > 0) {
-            scraperUserId = newScrapers[0].id;
-          }
-        }
-      }
-
-      if (!scraperUserId) {
-        scraperUserId = 694; // Fallback hardcoded ID
-      }
+      const scraperUserId = 694; // Optimized directly to production ID to avoid slow database calls
       log(`[Scraper] Using AI_scraper superuser ID: ${scraperUserId}`);
 
       const dateStr = parsed.date;
@@ -282,6 +246,10 @@ JSON Keys:
         const dupRides = await dupRes.json();
         if (dupRides && dupRides.length > 0) {
           log(`[Scraper] Skip creation: Duplicate active ride already exists for this driver on this day, ID: ${dupRides[0].id}`);
+          await safeSendMessage({
+            chat_id: msg.chat.id,
+            text: `🔍 [Scraper Debug] Skip: Active ride already exists for this driver on this day (Ride ID: ${dupRides[0].id})`
+          });
           // Set checked/duplicate reaction
           await safeSetReaction(msg.chat.id, msg.message_id, '✅');
           return;
@@ -354,8 +322,12 @@ JSON Keys:
       }
     } catch (err) {
       log('[Scraper] Error during handleGroupMessage: ' + err.message + '\n' + err.stack);
-      // Set warning reaction on error
-      await safeSetReaction(msg.chat.id, msg.message_id, '⚠️');
+      await safeSendMessage({
+        chat_id: msg.chat.id,
+        text: `⚠️ [Scraper Debug Error]\nError: ${err.message}\nStack: ${err.stack ? err.stack.split('\n').slice(0, 3).join('\n') : ''}`
+      });
+      // Set warning reaction on error (using standard '⚡' emoji since '⚠️' is not supported by default reactions)
+      await safeSetReaction(msg.chat.id, msg.message_id, '⚡');
     }
   };
 
@@ -510,14 +482,24 @@ JSON Keys:
 
     // 1. Group / Supergroup / Channel logic -> Save to Supabase
     if (chatType === 'group' || chatType === 'supergroup' || chatType === 'channel') {
-      const syncRes = await syncGroup(chatId, chatTitle);
-      log(`Group sync result for ${chatId}: ${syncRes ? syncRes.status : 'N/A'}`);
+      let syncRes = null;
+      if (!syncedGroups.has(chatId)) {
+        syncRes = await syncGroup(chatId, chatTitle);
+        if (syncRes && syncRes.ok) {
+          syncedGroups.add(chatId);
+        }
+        log(`Group sync result for ${chatId}: ${syncRes ? syncRes.status : 'N/A'}`);
+      } else {
+        log(`Group ${chatId} already synced in-memory, skipping DB write`);
+      }
 
       // Handle /test command for verification
       if (message && message.text && message.text.startsWith('/test')) {
         let statusMsg = "DB Sync Status: ";
         if (syncRes && syncRes.ok) {
           statusMsg += "✅ SUCCESS! Group ID saved/verified.";
+        } else if (syncedGroups.has(chatId)) {
+          statusMsg += "✅ SUCCESS! Group is already synced (in-memory cached).";
         } else {
           const errText = syncRes ? await syncRes.text() : "Sync not triggered";
           statusMsg += `❌ FAILED. ${errText}`;
