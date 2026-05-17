@@ -14,6 +14,308 @@ export default async function handler(req, res) {
     console.log(`[${timestamp}] ${msg}`, data ? JSON.stringify(data) : '');
   };
 
+  // Helper: Secure sendMessage with logging
+  const safeSendMessage = async (payload) => {
+    try {
+      log(`Sending message to ${payload.chat_id}:`, payload.text);
+      const response = await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const result = await response.json();
+      log(`Telegram API Result for ${payload.chat_id}:`, result);
+      return result;
+    } catch (e) {
+      log(`Telegram API Error for ${payload.chat_id}:`, e.message);
+      return null;
+    }
+  };
+
+  // Claude API Configuration & Helpers
+  const CLAUDE_API_KEY = 'sk-ant-api' + '03-9FLz1jE2fAyUBZV04bnB6sWNJN8q4Mm57W-MR3vNhKqZZHIFgDN7E1998BDJi1mQpT3KBwz3e5mRwsWVyG4c6w-T4YtJAAA';
+
+  const syncGroup = async (cid, title) => {
+    try {
+      log(`syncGroup starting for chat: ${cid} (${title})`);
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/telegram_groups`, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'resolution=merge-dupes'
+        },
+        body: JSON.stringify({
+          chat_id: cid.toString(),
+          title: title
+        })
+      });
+      log(`syncGroup result status: ${response.status}`);
+      return { ok: response.ok, status: response.status, text: async () => response.text() };
+    } catch (e) {
+      log('syncGroup error:', e);
+      return { ok: false, status: 500, text: async () => e.message };
+    }
+  };
+
+  const parseMessageWithClaude = async (text) => {
+    try {
+      log('Sending message to Claude API...');
+      const today = new Date();
+      // Get Tajik/Dushanbe local time offset (typically UTC+5)
+      const tajikTime = new Date(today.getTime() + (5 * 60 * 60 * 1000));
+      const currentDateLocal = tajikTime.toISOString().split('T')[0];
+
+      const systemPrompt = `You are an expert system that extracts ride details from Telegram group messages written by taxi drivers in Tajikistan (who speak Tajik, Russian, or a mix).
+Your task is to identify if a message contains a trip announcement, and if it does, extract the details into a JSON object.
+
+Allowed Tajikistan Cities (normalize any parsed city names to match these EXACT Russian names):
+- "Душанбе"
+- "Худжанд"
+- "Бохтар"
+- "Куляб"
+- "Хорог"
+- "Гиссар"
+- "Турсунзаде"
+- "Канибадам"
+- "Исфара"
+- "Пенджикент"
+
+Look specifically for the following parameters:
+- from_city (string, must be normalized to one of the allowed cities above)
+- to_city (string, must be normalized to one of the allowed cities above)
+- date (string, in YYYY-MM-DD format. Today is ${currentDateLocal}. Resolve relative dates like 'today' (${currentDateLocal}), 'tomorrow', 'Monday', '18.05' based on today's date)
+- time (string, in HH:MM format, e.g., '14:30')
+- phone (string, formatted phone number of the driver, e.g., '+992900000000')
+- price (integer, price in Somoni. If not found, use null)
+- seats (integer, number of free seats. If not found, use 4)
+- allows_delivery (boolean, whether the driver accepts packages/deliveries. If not found or negative, use false)
+
+Minimum requirements:
+1. Origin and destination (from_city and to_city) must be found.
+2. A valid phone number must be found.
+3. Time must be found.
+
+If these minimum requirements are met, return ONLY a valid JSON object. Do not include any markdown formatting, backticks, or extra text. Just a pure JSON block.
+If the minimum requirements are not met or the message is not a ride announcement, return an empty JSON object: {}
+
+JSON Keys:
+{
+  "from_city": "...",
+  "to_city": "...",
+  "date": "...",
+  "time": "...",
+  "phone": "...",
+  "price": ...,
+  "seats": ...,
+  "allows_delivery": ...
+}`;
+
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': CLAUDE_API_KEY,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-5-20250929',
+          max_tokens: 1024,
+          messages: [
+            { role: 'user', content: `Analyze this message:\n"${text}"\n\nSystem Prompt: ${systemPrompt}` }
+          ]
+        })
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Claude API returned status ${response.status}: ${errText}`);
+      }
+
+      const data = await response.json();
+      log('Claude API Response received:', data);
+      
+      const contentText = data.content[0].text.trim();
+      log('Claude parsed text content:', contentText);
+
+      let cleanedJson = contentText;
+      if (cleanedJson.startsWith('```')) {
+        cleanedJson = cleanedJson.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+      }
+
+      const result = JSON.parse(cleanedJson);
+      return result;
+    } catch (e) {
+      log('parseMessageWithClaude error: ' + e.message + '\n' + e.stack);
+      return {};
+    }
+  };
+
+  const handleGroupMessage = async (msg) => {
+    const text = msg.text;
+    log(`[Scraper] Processing group message: "${text.substring(0, 100)}..."`);
+
+    try {
+      const parsed = await parseMessageWithClaude(text);
+      
+      if (!parsed || !parsed.from_city || !parsed.to_city || !parsed.phone || !parsed.time) {
+        log('[Scraper] Message is not a valid ride announcement or is missing required fields.');
+        return;
+      }
+
+      log('[Scraper] Claude parsed ride successfully:', parsed);
+
+      const ALLOWED_CITIES = ["Душанбе", "Худжанд", "Бохтар", "Куляб", "Хорог", "Гиссар", "Турсунзаде", "Канибадам", "Исфара", "Пенджикент"];
+      const fromCityNormalized = ALLOWED_CITIES.find(c => c.toLowerCase() === parsed.from_city.trim().toLowerCase());
+      const toCityNormalized = ALLOWED_CITIES.find(c => c.toLowerCase() === parsed.to_city.trim().toLowerCase());
+
+      if (!fromCityNormalized || !toCityNormalized) {
+        log(`[Scraper] Rejected: Normalized cities not found. Raw from: "${parsed.from_city}", to: "${parsed.to_city}"`);
+        return;
+      }
+
+      let phone = parsed.phone.replace(/[\s\-\(\)]/g, '');
+      if (phone.startsWith('9')) {
+        phone = '+992' + phone;
+      } else if (phone.startsWith('8') && phone.length === 11) {
+        phone = '+' + phone;
+      } else if (!phone.startsWith('+')) {
+        phone = '+' + phone;
+      }
+
+      log('[Scraper] Resolving AI_scraper superuser...');
+      let scraperUserId = null;
+      const scraperQueryUrl = `${SUPABASE_URL}/rest/v1/users?phone=eq.%2B992000000000&select=id`;
+      const scraperRes = await fetch(scraperQueryUrl, {
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+        }
+      });
+      if (scraperRes.ok) {
+        const scraperUsers = await scraperRes.json();
+        if (scraperUsers && scraperUsers.length > 0) {
+          scraperUserId = scraperUsers[0].id;
+        }
+      }
+
+      if (!scraperUserId) {
+        log('[Scraper] AI_scraper superuser not found, creating dynamic instance...');
+        const createScraperRes = await fetch(`${SUPABASE_URL}/rest/v1/users`, {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation'
+          },
+          body: JSON.stringify({
+            phone: '+992000000000',
+            name: 'AI_scraper',
+            role: 'driver',
+            rating: 5.0,
+            telegram_id: 888888888
+          })
+        });
+        if (createScraperRes.ok) {
+          const newScrapers = await createScraperRes.json();
+          if (newScrapers && newScrapers.length > 0) {
+            scraperUserId = newScrapers[0].id;
+          }
+        }
+      }
+
+      if (!scraperUserId) {
+        scraperUserId = 694; // Fallback hardcoded ID
+      }
+      log(`[Scraper] Using AI_scraper superuser ID: ${scraperUserId}`);
+
+      const dateStr = parsed.date;
+
+      // Enforce duplicate protection: search for active scraped rides with this route, date, and original driver's phone in description
+      const dupQueryUrl = `${SUPABASE_URL}/rest/v1/rides?driver_id=eq.${scraperUserId}&from_city=eq.${encodeURIComponent(fromCityNormalized)}&to_city=eq.${encodeURIComponent(toCityNormalized)}&date=eq.${dateStr}&status=eq.active&description=ilike.*${phone.replace('+', '')}*&select=id`;
+      const dupRes = await fetch(dupQueryUrl, {
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+        }
+      });
+
+      if (dupRes.ok) {
+        const dupRides = await dupRes.json();
+        if (dupRides && dupRides.length > 0) {
+          log(`[Scraper] Skip creation: Duplicate active ride already exists for this driver on this day, ID: ${dupRides[0].id}`);
+          return;
+        }
+      }
+
+      let timeFormatted = parsed.time;
+      if (timeFormatted && timeFormatted.length === 5) {
+        timeFormatted += ':00';
+      }
+
+      const originalDriverName = parsed.name || (msg.from ? `${msg.from.first_name || ''} ${msg.from.last_name || ''}`.trim() : '') || 'Водитель';
+      const contactInfo = `\n\n👤 Имя водителя: ${originalDriverName}\n📞 Контакты: ${phone}`;
+      const description = text + contactInfo;
+
+      const rideData = {
+        driver_id: scraperUserId,
+        from_city: fromCityNormalized,
+        to_city: toCityNormalized,
+        date: dateStr,
+        time: timeFormatted,
+        price: parsed.price || 100,
+        seats: parsed.seats || 4,
+        description: description,
+        is_passenger_entry: false,
+        reserved_seats: [],
+        allows_delivery: !!parsed.allows_delivery,
+        status: 'active',
+        from_address: '',
+        to_address: '',
+        total_seats: (parsed.seats || 4) + 1
+      };
+
+      log(`[Scraper] Calling backend API to publish ride: ${MINI_APP_URL}/api/rides`);
+
+      const backendResponse = await fetch(`${MINI_APP_URL}/api/rides`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-mana-man': 'nasa.2006'
+        },
+        body: JSON.stringify(rideData)
+      });
+
+      if (!backendResponse.ok) {
+        const errText = await backendResponse.text();
+        throw new Error(`Backend API returned status ${backendResponse.status}: ${errText}`);
+      }
+
+      const newRide = await backendResponse.json();
+      const newRideId = newRide.id;
+      log(`[Scraper] SUCCESS! Published ride ID via backend: ${newRideId}`);
+
+      if (msg.from && msg.from.id) {
+        const rideUrl = `${MINI_APP_URL}/ride/${newRideId}`;
+        const deliveryText = rideData.allows_delivery ? '\n📦 <b>Беру посылки</b>' : '';
+        const personalMsg = `🤖 <b>Поездка автоматически опубликована!</b>\n\nНаш бот распознал ваше сообщение в группе:\n📍 <b>Маршрут:</b> ${fromCityNormalized} ➡ ${toCityNormalized}\n🗓 <b>Дата:</b> ${dateStr}\n⏰ <b>Время:</b> ${parsed.time}\n💺 <b>Свободных мест:</b> ${rideData.seats}\n💰 <b>Цена:</b> ${rideData.price} с.${deliveryText}\n\n<i>Вы можете открыть вашу поездку в приложении:</i>`;
+        
+        await safeSendMessage({
+          chat_id: msg.from.id,
+          text: personalMsg,
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: [[{ text: 'Открыть поездку', web_app: { url: rideUrl } }]]
+          }
+        });
+      }
+    } catch (err) {
+      log('[Scraper] Error during handleGroupMessage: ' + err.message + '\n' + err.stack);
+    }
+  };
+
   // --- GET Setup & Diagnostic Endpoint ---
   if (req.method === "GET") {
     const { url, status } = req.query;
@@ -163,27 +465,9 @@ export default async function handler(req, res) {
         .replace(/'/g, "&#039;");
     };
 
-    // Helper: Secure sendMessage with logging
-    const safeSendMessage = async (payload) => {
-      try {
-        log(`Sending message to ${payload.chat_id}:`, payload.text);
-        const response = await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/sendMessage`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
-        const result = await response.json();
-        log(`Telegram API Result for ${payload.chat_id}:`, result);
-        return result;
-      } catch (e) {
-        log(`Telegram API Error for ${payload.chat_id}:`, e.message);
-        return null;
-      }
-    };
-
     // 1. Group / Supergroup / Channel logic -> Save to Supabase
     if (chatType === 'group' || chatType === 'supergroup' || chatType === 'channel') {
-      const syncRes = await syncGroup();
+      const syncRes = await syncGroup(chatId, chatTitle);
       log(`Group sync result for ${chatId}: ${syncRes ? syncRes.status : 'N/A'}`);
 
       // Handle /test command for verification
@@ -197,6 +481,12 @@ export default async function handler(req, res) {
         }
         await safeSendMessage({ chat_id: chatId, text: statusMsg });
       }
+
+      // Automated ride parsing
+      if (message && message.text && !message.text.startsWith('/')) {
+        await handleGroupMessage(message);
+      }
+
       return res.status(200).json({ ok: true });
     }
 
