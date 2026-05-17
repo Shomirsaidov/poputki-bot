@@ -32,6 +32,34 @@ export default async function handler(req, res) {
     }
   };
 
+  // Helper: Secure setMessageReaction with logging
+  const safeSetReaction = async (chatId, messageId, emoji) => {
+    try {
+      log(`Setting reaction ${emoji || 'CLEAR'} for message ${messageId} in chat ${chatId}`);
+      const body = {
+        chat_id: chatId,
+        message_id: messageId,
+        is_big: false
+      };
+      if (emoji) {
+        body.reaction = [{ type: 'emoji', emoji: emoji }];
+      } else {
+        body.reaction = [];
+      }
+      const response = await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/setMessageReaction`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const result = await response.json();
+      log(`setMessageReaction API Result:`, result);
+      return result;
+    } catch (e) {
+      log(`setMessageReaction API Error:`, e.message);
+      return null;
+    }
+  };
+
   // Claude API Configuration & Helpers
   const CLAUDE_API_KEY = 'sk-ant-api' + '03-9FLz1jE2fAyUBZV04bnB6sWNJN8q4Mm57W-MR3vNhKqZZHIFgDN7E1998BDJi1mQpT3KBwz3e5mRwsWVyG4c6w-T4YtJAAA';
 
@@ -156,11 +184,16 @@ JSON Keys:
     const text = msg.text;
     log(`[Scraper] Processing group message: "${text.substring(0, 100)}..."`);
 
+    // Set active reading/scraping reaction instantly
+    await safeSetReaction(msg.chat.id, msg.message_id, '👀');
+
     try {
       const parsed = await parseMessageWithClaude(text);
       
       if (!parsed || !parsed.from_city || !parsed.to_city || !parsed.phone || !parsed.time) {
         log('[Scraper] Message is not a valid ride announcement or is missing required fields.');
+        // Clear reaction if it's not a ride announcement
+        await safeSetReaction(msg.chat.id, msg.message_id, '');
         return;
       }
 
@@ -172,6 +205,8 @@ JSON Keys:
 
       if (!fromCityNormalized || !toCityNormalized) {
         log(`[Scraper] Rejected: Normalized cities not found. Raw from: "${parsed.from_city}", to: "${parsed.to_city}"`);
+        // Clear reaction if cities not found
+        await safeSetReaction(msg.chat.id, msg.message_id, '');
         return;
       }
 
@@ -246,6 +281,8 @@ JSON Keys:
         const dupRides = await dupRes.json();
         if (dupRides && dupRides.length > 0) {
           log(`[Scraper] Skip creation: Duplicate active ride already exists for this driver on this day, ID: ${dupRides[0].id}`);
+          // Set checked/duplicate reaction
+          await safeSetReaction(msg.chat.id, msg.message_id, '✅');
           return;
         }
       }
@@ -297,6 +334,9 @@ JSON Keys:
       const newRideId = newRide.id;
       log(`[Scraper] SUCCESS! Published ride ID via backend: ${newRideId}`);
 
+      // Set successful publication reaction
+      await safeSetReaction(msg.chat.id, msg.message_id, '👍');
+
       if (msg.from && msg.from.id) {
         const rideUrl = `${MINI_APP_URL}/ride/${newRideId}`;
         const deliveryText = rideData.allows_delivery ? '\n📦 <b>Беру посылки</b>' : '';
@@ -313,6 +353,8 @@ JSON Keys:
       }
     } catch (err) {
       log('[Scraper] Error during handleGroupMessage: ' + err.message + '\n' + err.stack);
+      // Set warning reaction on error
+      await safeSetReaction(msg.chat.id, msg.message_id, '⚠️');
     }
   };
 
