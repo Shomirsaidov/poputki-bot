@@ -95,24 +95,28 @@ export default async function handler(req, res) {
       const tajikTime = new Date(today.getTime() + (5 * 60 * 60 * 1000));
       const currentDateLocal = tajikTime.toISOString().split('T')[0];
 
-      const systemPrompt = `You are an expert system that extracts ride details from Telegram group messages written by taxi drivers in Tajikistan (who speak Tajik, Russian, or a mix).
+       const systemPrompt = `You are an expert system that extracts ride details from Telegram group messages written by taxi drivers in Tajikistan (who speak Tajik, Russian, or a mix).
 Your task is to identify if a message contains a trip announcement, and if it does, extract the details into a JSON object.
 
-Allowed Tajikistan Cities (normalize any parsed city names to match these EXACT Russian names):
-- "Душанбе"
-- "Худжанд"
-- "Бохтар"
-- "Куляб"
-- "Хорог"
+Allowed Tajikistan Cities (normalize any parsed city names, nearby towns, border checkpoints, suburbs, typos, or spelling variations to match one of these EXACT 10 Russian city names):
+- "Душанбе" (Map nearby towns like Вахдат, Нурек, Варзоб, Файзабад here)
+- "Худжанд" (Map nearby districts/border crossings like Ойбек, Фотехобод, Мастчох, Бустон, Б. Гафуров here)
+- "Бохтар" (Map nearby regions like Яван, Колхозабад, Шахритус, Кумсангир here)
+- "Куляб" (Map nearby regions like Дангара, Восе, Фархор, Хамадони here)
+- "Хорог" (Map nearby GBAO regions like Дарваз, Ванч, Ишкашим, Мургаб here)
 - "Гиссар"
-- "Турсунзаде"
+- "Турсунзаде" (Map nearby border check-points or Шахринав here)
 - "Канибадам"
-- "Исфара"
-- "Пенджикент"
+- "Исфара" (Map Vorukh or Lakkon here)
+- "Пенджикент" (Map nearby check-points like Саразм here)
+
+CRITICAL RULE:
+Your extracted 'from_city' and 'to_city' MUST strictly be one of the 10 Russian city names listed above.
+Taxi drivers in Tajik/Russian chats often write smaller towns, villages, airports, or border checkpoints (e.g., 'Ойбек', 'Саразм', 'Дангара', 'Вахдат'). You MUST neglect these minor discrepancies, typos, or specific locations, and dynamically map them to the CLOSEST allowed major city by geographical meaning or transportation route (for example, map 'Ойбек' directly to 'Худжанд').
 
 Look specifically for the following parameters:
-- from_city (string, must be normalized to one of the allowed cities above)
-- to_city (string, must be normalized to one of the allowed cities above)
+- from_city (string, must be normalized to one of the 10 allowed cities above)
+- to_city (string, must be normalized to one of the 10 allowed cities above)
 - date (string, in YYYY-MM-DD format. Today is ${currentDateLocal}. Resolve relative dates like 'today' (${currentDateLocal}), 'tomorrow', 'Monday', '18.05' based on today's date)
 - time (string, in HH:MM format, e.g., '14:30')
 - phone (string, formatted phone number of the driver, e.g., '+992900000000')
