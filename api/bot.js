@@ -270,6 +270,15 @@ JSON Keys:
       const contactInfo = `\n\n👤 Имя водителя: ${originalDriverName}\n📞 Контакты: ${phone}`;
       const description = text + contactInfo;
 
+      const scraperMetadata = {
+        chat_id: msg.chat.id,
+        message_id: msg.message_id,
+        user_id: msg.from ? msg.from.id : null,
+        username: msg.from ? msg.from.username : null,
+        first_name: msg.from ? msg.from.first_name : null,
+        last_name: msg.from ? msg.from.last_name : null
+      };
+
       const rideData = {
         driver_id: scraperUserId,
         from_city: fromCityNormalized,
@@ -285,7 +294,8 @@ JSON Keys:
         status: 'active',
         from_address: '',
         to_address: '',
-        total_seats: (parsed.seats || 4) + 1
+        total_seats: (parsed.seats || 4) + 1,
+        scraper_metadata: scraperMetadata
       };
 
       log(`[Scraper] Calling backend API to publish ride: ${BACKEND_API_URL}/rides`);
