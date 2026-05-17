@@ -276,7 +276,8 @@ JSON Keys:
         user_id: msg.from ? msg.from.id : null,
         username: msg.from ? msg.from.username : null,
         first_name: msg.from ? msg.from.first_name : null,
-        last_name: msg.from ? msg.from.last_name : null
+        last_name: msg.from ? msg.from.last_name : null,
+        phone: phone
       };
 
       const rideData = {
