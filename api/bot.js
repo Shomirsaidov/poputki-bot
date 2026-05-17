@@ -95,24 +95,25 @@ export default async function handler(req, res) {
       const tajikTime = new Date(today.getTime() + (5 * 60 * 60 * 1000));
       const currentDateLocal = tajikTime.toISOString().split('T')[0];
 
-       const systemPrompt = `You are an expert system that extracts ride details from Telegram group messages written by taxi drivers in Tajikistan (who speak Tajik, Russian, or a mix).
+      const systemPrompt = `You are an expert system that extracts ride details from Telegram group messages written by taxi drivers in Tajikistan (who speak Tajik, Russian, or a mix).
 Your task is to identify if a message contains a trip announcement, and if it does, extract the details into a JSON object.
 
-Allowed Tajikistan Cities (normalize any parsed city names, nearby towns, border checkpoints, suburbs, typos, or spelling variations to match one of these EXACT 10 Russian city names):
-- "Душанбе" (Map nearby towns like Вахдат, Нурек, Варзоб, Файзабад here)
-- "Худжанд" (Map nearby districts/border crossings like Ойбек, Фотехобод, Мастчох, Бустон, Б. Гафуров here)
-- "Бохтар" (Map nearby regions like Яван, Колхозабад, Шахритус, Кумсангир here)
-- "Куляб" (Map nearby regions like Дангара, Восе, Фархор, Хамадони here)
-- "Хорог" (Map nearby GBAO regions like Дарваз, Ванч, Ишкашим, Мургаб here)
+Allowed Tajikistan Cities (normalize any parsed city names, nearby towns, border checkpoints, suburbs, typos, or spelling variations to match one of these EXACT 10 Tajik city names):
+- "Душанбе" 
+- "Худжанд" 
+- "Бохтар" 
+- "Куляб" 
+- "Хорог" 
 - "Гиссар"
-- "Турсунзаде" (Map nearby border check-points or Шахринав here)
+- "Ойбек" 
+- "Турсунзаде" 
 - "Канибадам"
-- "Исфара" (Map Vorukh or Lakkon here)
-- "Пенджикент" (Map nearby check-points like Саразм here)
+- "Исфара" 
+- "Пенджикент"
 
 CRITICAL RULE:
-Your extracted 'from_city' and 'to_city' MUST strictly be one of the 10 Russian city names listed above.
-Taxi drivers in Tajik/Russian chats often write smaller towns, villages, airports, or border checkpoints (e.g., 'Ойбек', 'Саразм', 'Дангара', 'Вахдат'). You MUST neglect these minor discrepancies, typos, or specific locations, and dynamically map them to the CLOSEST allowed major city by geographical meaning or transportation route (for example, map 'Ойбек' directly to 'Худжанд').
+Your extracted 'from_city' and 'to_city' should not strictly be one of the 10 Russian city names listed above. its plausible that in messsage there can be some typo for city name. if completely new city name detected, you can include that in json as well, even though its not in list.
+You MUST neglect these minor discrepancies, typos, or specific locations, and dynamically map them to the CLOSEST allowed major city by writing.
 
 Look specifically for the following parameters:
 - from_city (string, must be normalized to one of the 10 allowed cities above)
@@ -167,7 +168,7 @@ JSON Keys:
 
       const data = await response.json();
       log('Claude API Response received:', data);
-      
+
       const contentText = data.content[0].text.trim();
       log('Claude parsed text content:', contentText);
 
@@ -193,7 +194,7 @@ JSON Keys:
 
     try {
       const parsed = await parseMessageWithClaude(text);
-      
+
       if (!parsed || !parsed.from_city || !parsed.to_city || !parsed.phone || !parsed.time) {
         log('[Scraper] Message is not a valid ride announcement or is missing required fields.');
         await safeSendMessage({
@@ -207,7 +208,7 @@ JSON Keys:
 
       log('[Scraper] Claude parsed ride successfully:', parsed);
 
-      const ALLOWED_CITIES = ["Душанбе", "Худжанд", "Бохтар", "Куляб", "Хорог", "Гиссар", "Турсунзаде", "Канибадам", "Исфара", "Пенджикент"];
+      const ALLOWED_CITIES = ["Душанбе", "Худжанд", "Бохтар", "Куляб", "Хорог", "Гиссар", "Ойбек", "Турсунзаде", "Канибадам", "Исфара", "Пенджикент"];
       const fromCityNormalized = ALLOWED_CITIES.find(c => c.toLowerCase() === parsed.from_city.trim().toLowerCase());
       const toCityNormalized = ALLOWED_CITIES.find(c => c.toLowerCase() === parsed.to_city.trim().toLowerCase());
 
@@ -314,7 +315,7 @@ JSON Keys:
         const rideUrl = `${MINI_APP_URL}/ride/${newRideId}`;
         const deliveryText = rideData.allows_delivery ? '\n📦 <b>Беру посылки</b>' : '';
         const personalMsg = `🤖 <b>Поездка автоматически опубликована!</b>\n\nНаш бот распознал ваше сообщение в группе:\n📍 <b>Маршрут:</b> ${fromCityNormalized} ➡ ${toCityNormalized}\n🗓 <b>Дата:</b> ${dateStr}\n⏰ <b>Время:</b> ${parsed.time}\n💺 <b>Свободных мест:</b> ${rideData.seats}\n💰 <b>Цена:</b> ${rideData.price} с.${deliveryText}\n\n<i>Вы можете открыть вашу поездку в приложении:</i>`;
-        
+
         await safeSendMessage({
           chat_id: msg.from.id,
           text: personalMsg,
@@ -346,7 +347,7 @@ JSON Keys:
         const webhookInfo = await webhookInfoRes.json();
         const meRes = await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/getMe`);
         const me = await meRes.json();
-        
+
         if (!webhookInfo.ok) {
           return res.status(200).json({ ok: false, error: "Telegram getWebhookInfo failed", details: webhookInfo });
         }
@@ -454,7 +455,7 @@ JSON Keys:
       const chatId = callbackQuery.message.chat.id;
       const data = callbackQuery.data;
       log(`Callback query from chat ${chatId}: ${data}`);
-      
+
       // Acknowledge callback query
       await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/answerCallbackQuery`, {
         method: "POST",
@@ -528,7 +529,7 @@ JSON Keys:
         await safeSendMessage({ chat_id: chatId, text: "Pong! 🏓 Bot is active." });
         return res.status(200).json({ ok: true });
       }
-      
+
       // Handle /start command (both with and without params)
       if (text.startsWith('/start')) {
         const parts = text.split(' ');
@@ -536,7 +537,7 @@ JSON Keys:
 
         if (param) {
           log(`Handling deep link with param: ${param}`);
-          
+
           if (param.startsWith('ride_')) {
             const rideId = param.replace('ride_', '');
             try {
@@ -547,7 +548,7 @@ JSON Keys:
                   'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
                 }
               });
-              
+
               if (!rideResponse.ok) throw new Error(`Supabase error: ${rideResponse.status}`);
 
               const rideDataArray = await rideResponse.json();
@@ -604,10 +605,10 @@ JSON Keys:
                 const fromCity = escapeHtml(bus.from_city);
                 const toCity = escapeHtml(bus.to_city);
                 const company = escapeHtml(bus.transport_company);
-                
+
                 const stops = (typeof bus.intermediate_stops === 'string' ? JSON.parse(bus.intermediate_stops || '[]') : (bus.intermediate_stops || []));
                 const stopsText = stops.length > 0 ? `\n🛑 <b>Остановки:</b> ${stops.map(s => escapeHtml(s.city)).join(', ')}` : '';
-                
+
                 const msg = `🚌 <b>АВТОБУСНЫЙ РЕЙС</b>\n\n📍 <b>Маршрут:</b> ${fromCity} ➡ ${toCity}${stopsText}\n🗓 <b>Дата:</b> ${dateStr}\n⏰ <b>Время:</b> ${timeStr}\n💰 <b>Цена:</b> ${bus.price} сом\n🏢 <b>Перевозчик:</b> ${company}`;
 
                 await safeSendMessage({
@@ -629,7 +630,7 @@ JSON Keys:
 
       // Default Welcome Message (Fallback)
       const welcomeText = "Poputki.online – это современное приложение, которое делает междугородние поездки проще и выгоднее.\nТы еще ждешь?\n👇ЖМИ👇";
-      
+
       const persistentMenu = {
         keyboard: [
           [{ text: "Создать поездку", web_app: { url: `${MINI_APP_URL}/create` } }, { text: "Найти поездку", web_app: { url: `${MINI_APP_URL}/search` } }],
