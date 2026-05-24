@@ -95,10 +95,10 @@ export default async function handler(req, res) {
       const tajikTime = new Date(today.getTime() + (5 * 60 * 60 * 1000));
       const currentDateLocal = tajikTime.toISOString().split('T')[0];
 
-      const systemPrompt = `You are an expert system that extracts ride details from Telegram group messages written by taxi drivers in Tajikistan (who speak Tajik, Russian, or a mix).
-Your task is to identify if a message contains a trip announcement, and if it does, extract the details into a JSON object.
+      const systemPrompt = `You are an expert system that extracts ride details from Telegram group messages written by taxi drivers (looking for passengers) or passengers (looking for taxi drivers) in Tajikistan (who speak Tajik, Russian, Uzbek or a mix).
+Your task is to identify if a message contains a ride or trip announcement (by either driver or passenger), and if it does, extract the details into a JSON object.
 
-Allowed Tajikistan Cities (normalize any parsed city names, nearby towns, border checkpoints, suburbs, typos, or spelling variations to match one of these EXACT 10 Tajik city names):
+Allowed Tajikistan Cities (normalize any parsed city names, nearby towns, border checkpoints, suburbs, typos, or spelling variations to match one of these EXACT Tajik city names):
 - "Душанбе" 
 - "Худжанд" 
 - "Бохтар" 
@@ -112,26 +112,26 @@ Allowed Tajikistan Cities (normalize any parsed city names, nearby towns, border
 - "Пенджикент"
 
 CRITICAL RULE:
-Your extracted 'from_city' and 'to_city' should not strictly be one of the 10 Russian city names listed above. its plausible that in messsage there can be some typo for city name. if completely new city name detected, you can include that in json as well, even though its not in list.
-You MUST neglect these minor discrepancies, typos, or specific locations, and dynamically map them to the CLOSEST allowed major city by writing.
+Your extracted 'from_city' and 'to_city' should not strictly be one of the city names listed above. If a completely new city name is detected, you can include that in the JSON as well.
+You MUST neglect minor spelling discrepancies, typos, or specific micro-locations, and dynamically map them to the CLOSEST allowed major city if it's within that city's vicinity or is a common spelling of it.
 
 Look specifically for the following parameters:
-- from_city (string, must be normalized to one of the 10 allowed cities above)
-- to_city (string, must be normalized to one of the 10 allowed cities above)
+- from_city (string, normalized to one of the allowed cities above if possible)
+- to_city (string, normalized to one of the allowed cities above if possible)
 - date (string, in YYYY-MM-DD format. Today is ${currentDateLocal}. Resolve relative dates like 'today' (${currentDateLocal}), 'tomorrow', 'Monday', '18.05' based on today's date)
-- time (string, in HH:MM format, e.g., '14:30')
-- phone (string, formatted phone number of the driver, e.g., '+992900000000')
+- time (string, in HH:MM format, e.g., '14:30'. If time is not found, default to '12:00' or resolve based on context, e.g. morning -> '08:00', evening -> '18:00', afternoon -> '14:00')
+- phone (string, formatted phone number of the driver or passenger, e.g., '+992900000000')
 - price (integer, price in Somoni. If not found, use null)
-- seats (integer, number of free seats. If not found, use 4)
-- allows_delivery (boolean, whether the driver accepts packages/deliveries. If not found or negative, use false)
+- is_passenger_entry (boolean, true if the message is written by passenger(s) looking for a driver/ride, false if written by a driver offering a ride/looking for passengers)
+- seats (integer, number of seats. If is_passenger_entry is true, this is the number of passengers looking for a ride [default 1]. If is_passenger_entry is false, this is the number of free seats available in the car [default 4])
+- allows_delivery (boolean, whether the driver accepts packages/deliveries. If is_passenger_entry is true, set this to false. If not found or negative, use false)
 
 Minimum requirements:
 1. Origin and destination (from_city and to_city) must be found.
 2. A valid phone number must be found.
-3. Time must be found.
 
 If these minimum requirements are met, return ONLY a valid JSON object. Do not include any markdown formatting, backticks, or extra text. Just a pure JSON block.
-If the minimum requirements are not met or the message is not a ride announcement, return an empty JSON object: {}
+If the minimum requirements are not met or the message is not a ride/trip announcement, return an empty JSON object: {}
 
 JSON Keys:
 {
@@ -141,6 +141,7 @@ JSON Keys:
   "time": "...",
   "phone": "...",
   "price": ...,
+  "is_passenger_entry": ...,
   "seats": ...,
   "allows_delivery": ...
 }`;
@@ -197,10 +198,6 @@ JSON Keys:
 
       if (!parsed || !parsed.from_city || !parsed.to_city || !parsed.phone || !parsed.time) {
         log('[Scraper] Message is not a valid ride announcement or is missing required fields.');
-        await safeSendMessage({
-          chat_id: msg.chat.id,
-          text: `🔍 [Scraper Debug] Rejected: Message is not a ride announcement or is missing required fields.\nParsed data: ${JSON.stringify(parsed)}`
-        });
         // Clear reaction if it's not a ride announcement
         await safeSetReaction(msg.chat.id, msg.message_id, '');
         return;
@@ -214,10 +211,6 @@ JSON Keys:
 
       if (!fromCityNormalized || !toCityNormalized) {
         log(`[Scraper] Rejected: Normalized cities not found. Raw from: "${parsed.from_city}", to: "${parsed.to_city}"`);
-        await safeSendMessage({
-          chat_id: msg.chat.id,
-          text: `🔍 [Scraper Debug] Rejected: Cities could not be normalized to supported regions.\nParsed Origin: "${parsed.from_city}"\nParsed Destination: "${parsed.to_city}"`
-        });
         // Clear reaction if cities not found
         await safeSetReaction(msg.chat.id, msg.message_id, '');
         return;
@@ -232,9 +225,9 @@ JSON Keys:
         phone = '+' + phone;
       }
 
-      log('[Scraper] Resolving AI_scraper superuser...');
+      log('[Scraper] Resolving Ронанда superuser...');
       const scraperUserId = 694; // Optimized directly to production ID to avoid slow database calls
-      log(`[Scraper] Using AI_scraper superuser ID: ${scraperUserId}`);
+      log(`[Scraper] Using Ронанда superuser ID: ${scraperUserId}`);
 
       const dateStr = parsed.date;
 
@@ -251,10 +244,6 @@ JSON Keys:
         const dupRides = await dupRes.json();
         if (dupRides && dupRides.length > 0) {
           log(`[Scraper] Skip creation: Duplicate active ride already exists for this driver on this day, ID: ${dupRides[0].id}`);
-          await safeSendMessage({
-            chat_id: msg.chat.id,
-            text: `🔍 [Scraper Debug] Skip: Active ride already exists for this driver on this day (Ride ID: ${dupRides[0].id})`
-          });
           // Set checked/duplicate reaction
           await safeSetReaction(msg.chat.id, msg.message_id, '✅');
           return;
@@ -266,8 +255,10 @@ JSON Keys:
         timeFormatted += ':00';
       }
 
-      const originalDriverName = parsed.name || (msg.from ? `${msg.from.first_name || ''} ${msg.from.last_name || ''}`.trim() : '') || 'Водитель';
-      const contactInfo = `\n\n👤 Имя водителя: ${originalDriverName}\n📞 Контакты: ${phone}`;
+      const isPassenger = !!parsed.is_passenger_entry;
+      const authorRoleName = isPassenger ? 'Пассажир' : 'Водитель';
+      const originalAuthorName = parsed.name || (msg.from ? `${msg.from.first_name || ''} ${msg.from.last_name || ''}`.trim() : '') || authorRoleName;
+      const contactInfo = `\n\n👤 Имя: ${originalAuthorName}\n📞 Контакты: ${phone}`;
       const description = text + contactInfo;
 
       const scraperMetadata = {
@@ -287,15 +278,15 @@ JSON Keys:
         date: dateStr,
         time: timeFormatted,
         price: parsed.price || 100,
-        seats: parsed.seats || 4,
+        seats: parsed.seats || (isPassenger ? 1 : 4),
         description: description,
-        is_passenger_entry: false,
+        is_passenger_entry: isPassenger,
         reserved_seats: [],
-        allows_delivery: !!parsed.allows_delivery,
+        allows_delivery: isPassenger ? false : !!parsed.allows_delivery,
         status: 'active',
         from_address: '',
         to_address: '',
-        total_seats: (parsed.seats || 4) + 1,
+        total_seats: isPassenger ? (parsed.seats || 1) : ((parsed.seats || 4) + 1),
         scraper_metadata: scraperMetadata
       };
 
@@ -324,24 +315,25 @@ JSON Keys:
 
       if (msg.from && msg.from.id) {
         const rideUrl = `${MINI_APP_URL}/ride/${newRideId}`;
-        const deliveryText = rideData.allows_delivery ? '\n📦 <b>Беру посылки</b>' : '';
-        const personalMsg = `🤖 <b>Поездка автоматически опубликована!</b>\n\nНаш бот распознал ваше сообщение в группе:\n📍 <b>Маршрут:</b> ${fromCityNormalized} ➡ ${toCityNormalized}\n🗓 <b>Дата:</b> ${dateStr}\n⏰ <b>Время:</b> ${parsed.time}\n💺 <b>Свободных мест:</b> ${rideData.seats}\n💰 <b>Цена:</b> ${rideData.price} с.${deliveryText}\n\n<i>Вы можете открыть вашу поездку в приложении:</i>`;
+        let personalMsg = '';
+        if (isPassenger) {
+          personalMsg = `🤖 <b>Заявка автоматически опубликована!</b>\n\nНаш бот распознал ваше сообщение в группе:\n📍 <b>Маршрут:</b> ${fromCityNormalized} ➡ ${toCityNormalized}\n🗓 <b>Дата:</b> ${dateStr}\n⏰ <b>Время:</b> ${parsed.time}\n🙋‍♂️ <b>Пассажиров:</b> ${rideData.seats}\n💰 <b>Цена:</b> ${rideData.price} с.\n\n<i>Вы можете открыть вашу заявку в приложении:</i>`;
+        } else {
+          const deliveryText = rideData.allows_delivery ? '\n📦 <b>Беру посылки</b>' : '';
+          personalMsg = `🤖 <b>Поездка автоматически опубликована!</b>\n\nНаш бот распознал ваше сообщение в группе:\n📍 <b>Маршрут:</b> ${fromCityNormalized} ➡ ${toCityNormalized}\n🗓 <b>Дата:</b> ${dateStr}\n⏰ <b>Время:</b> ${parsed.time}\n💺 <b>Свободных мест:</b> ${rideData.seats}\n💰 <b>Цена:</b> ${rideData.price} с.${deliveryText}\n\n<i>Вы можете открыть вашу поездку в приложении:</i>`;
+        }
 
         await safeSendMessage({
           chat_id: msg.from.id,
           text: personalMsg,
           parse_mode: 'HTML',
           reply_markup: {
-            inline_keyboard: [[{ text: 'Открыть поездку', web_app: { url: rideUrl } }]]
+            inline_keyboard: [[{ text: isPassenger ? 'Открыть заявку' : 'Открыть поездку', web_app: { url: rideUrl } }]]
           }
         });
       }
     } catch (err) {
       log('[Scraper] Error during handleGroupMessage: ' + err.message + '\n' + err.stack);
-      await safeSendMessage({
-        chat_id: msg.chat.id,
-        text: `⚠️ [Scraper Debug Error]\nError: ${err.message}\nStack: ${err.stack ? err.stack.split('\n').slice(0, 3).join('\n') : ''}`
-      });
       // Set warning reaction on error (using standard '⚡' emoji since '⚠️' is not supported by default reactions)
       await safeSetReaction(msg.chat.id, msg.message_id, '⚡');
     }
