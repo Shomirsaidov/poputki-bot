@@ -96,13 +96,14 @@ export default async function handler(req, res) {
       const currentDateLocal = tajikTime.toISOString().split('T')[0];
 
       const systemPrompt = `You are an expert system that extracts ride details from Telegram group messages written by taxi drivers (looking for passengers) or passengers (looking for taxi drivers) in Tajikistan (who speak Tajik, Russian, Uzbek or a mix).
-Your task is to identify if a message contains a ride or trip announcement (by either driver or passenger), and if it does, extract the details into a JSON object.
+Your task is to identify if a message contains a ride or trip announcement (by either driver or passenger), and if it does, extract the details into a JSON object. In ride announcements as driver you can look for keywords : "лозим","мерам","даркор". 
 
 Allowed Tajikistan Cities (normalize any parsed city names, nearby towns, border checkpoints, suburbs, typos, or spelling variations to match one of these EXACT Tajik city names):
 - "Душанбе" 
 - "Худжанд" 
 - "Бохтар" 
 - "Куляб" 
+- "Истаравшан"
 - "Хорог" 
 - "Гиссар"
 - "Ойбек" 
@@ -112,7 +113,7 @@ Allowed Tajikistan Cities (normalize any parsed city names, nearby towns, border
 - "Пенджикент"
 
 CRITICAL RULE:
-Your extracted 'from_city' and 'to_city' should not strictly be one of the city names listed above. If a completely new city name is detected, you can include that in the JSON as well.
+Your extracted 'from_city' and 'to_city' should not strictly be one of the city names listed above. If a completely new unknown city name is detected, you can include that in the JSON as well.
 You MUST neglect minor spelling discrepancies, typos, or specific micro-locations, and dynamically map them to the CLOSEST allowed major city if it's within that city's vicinity or is a common spelling of it.
 
 Look specifically for the following parameters:
