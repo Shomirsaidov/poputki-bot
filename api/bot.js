@@ -94,7 +94,7 @@ export default async function handler(req, res) {
       // Get Tajik/Dushanbe local time offset (typically UTC+5)
       const tajikTime = new Date(today.getTime() + (5 * 60 * 60 * 1000));
       const currentDateLocal = tajikTime.toISOString().split('T')[0];
-      const currentTimeLocal = new Date().toLocaleTimeString();
+      const currentHourLocal = tajikTime.toISOString().split('T')[1];
 
       const systemPrompt = `You are an expert system that extracts ride details from Telegram group messages written by taxi drivers (looking for passengers) or passengers (looking for taxi drivers) in Tajikistan (who speak Tajik, Russian, Uzbek or a mix).
 Your task is to identify if a message contains a ride or trip announcement (by either driver or passenger), and if it does, extract the details into a JSON object. In ride announcements as driver you can look for keywords : "лозим","мерам","даркор". 
