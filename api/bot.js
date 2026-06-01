@@ -119,7 +119,7 @@ You MUST neglect minor spelling discrepancies, typos, or specific micro-location
 Look specifically for the following parameters:
 - from_city (string, normalized to one of the allowed cities above if possible)
 - to_city (string, normalized to one of the allowed cities above if possible)
-- date (string, in YYYY-MM-DD format. Today is ${currentDateLocal}. Resolve relative dates like 'today' (${currentDateLocal}), 'tomorrow', 'Monday', '18.05' based on today's date)
+- date (string, in YYYY-MM-DD format. Today is ${currentDateLocal}. Resolve relative dates like 'today' (${currentDateLocal}), 'tomorrow', 'Monday', '18.05' based on today's date). Remember the word "пага" - means tomorrow in tajik
 - time (string, in HH:MM format, e.g., '14:30'. If time is not found, default to '12:00' or resolve based on context, e.g. morning -> '08:00', evening -> '18:00', afternoon -> '14:00')
 - phone (string, formatted phone number of the driver or passenger, e.g., '+992900000000')
 - price (integer, price in Somoni. If not found, use null)
@@ -127,9 +127,12 @@ Look specifically for the following parameters:
 - seats (integer, number of seats. If is_passenger_entry is true, this is the number of passengers looking for a ride [default 1]. If is_passenger_entry is false, this is the number of free seats available in the car [default 4])
 - allows_delivery (boolean, whether the driver accepts packages/deliveries. If is_passenger_entry is true, set this to false. If not found or negative, use false)
 
+
 Minimum requirements:
 1. Origin and destination (from_city and to_city) must be found.
 2. A valid phone number must be found.
+
+Also if the exact time of the trip is not indicated in the message at all, just take the current time local and add four hours, then use it in your json response - meaning after four hours of the annoucement.
 
 If these minimum requirements are met, return ONLY a valid JSON object. Do not include any markdown formatting, backticks, or extra text. Just a pure JSON block.
 If the minimum requirements are not met or the message is not a ride/trip announcement, return an empty JSON object: {}
