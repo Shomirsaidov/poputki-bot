@@ -133,7 +133,7 @@ Minimum requirements:
 1. Origin and destination (from_city and to_city) must be found.
 2. A valid phone number must be found.
 
-Also if the exact time of the trip is not indicated in the message at all, take this time : ${currentTimeLocal} and add four hours, then use it in your json response - meaning four hours past this time.
+Also if the exact time of the trip is not indicated in the message at all, take this time : ${currentHourLocal} and add four hours, then use it in your json response - meaning four hours past this time.
 
 If these minimum requirements are met, return ONLY a valid JSON object. Do not include any markdown formatting, backticks, or extra text. Just a pure JSON block.
 If the minimum requirements are not met or the message is not a ride/trip announcement, return an empty JSON object: {}
