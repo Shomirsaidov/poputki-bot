@@ -94,6 +94,7 @@ export default async function handler(req, res) {
       // Get Tajik/Dushanbe local time offset (typically UTC+5)
       const tajikTime = new Date(today.getTime() + (5 * 60 * 60 * 1000));
       const currentDateLocal = tajikTime.toISOString().split('T')[0];
+      const currentTimeLocal = new Date().toLocaleTimeString();
 
       const systemPrompt = `You are an expert system that extracts ride details from Telegram group messages written by taxi drivers (looking for passengers) or passengers (looking for taxi drivers) in Tajikistan (who speak Tajik, Russian, Uzbek or a mix).
 Your task is to identify if a message contains a ride or trip announcement (by either driver or passenger), and if it does, extract the details into a JSON object. In ride announcements as driver you can look for keywords : "лозим","мерам","даркор". 
@@ -132,7 +133,7 @@ Minimum requirements:
 1. Origin and destination (from_city and to_city) must be found.
 2. A valid phone number must be found.
 
-Also if the exact time of the trip is not indicated in the message at all, just take the current time local and add four hours, then use it in your json response - meaning after four hours of the annoucement.
+Also if the exact time of the trip is not indicated in the message at all, take this time : ${currentTimeLocal} and add four hours, then use it in your json response - meaning four hours past this time.
 
 If these minimum requirements are met, return ONLY a valid JSON object. Do not include any markdown formatting, backticks, or extra text. Just a pure JSON block.
 If the minimum requirements are not met or the message is not a ride/trip announcement, return an empty JSON object: {}
