@@ -209,23 +209,6 @@ JSON Keys:
         log('[Scraper] Message is not a valid ride announcement or is missing required fields.');
         // Clear reaction if it's not a ride announcement
         await safeSetReaction(msg.chat.id, msg.message_id, '');
-
-        // Respond with fallback instruction to help the user manually or enter correctly
-        await safeSendMessage({
-          chat_id: msg.chat.id,
-          text: "🤖 Войдите в @poputkionline_bot, чтобы найти водителей или пассажиров вручную, либо укажите правильно время и направление поездки.",
-          reply_to_message_id: msg.message_id,
-          reply_markup: {
-            inline_keyboard: [
-              [
-                {
-                  text: "Открыть @poputkionline_bot",
-                  url: "https://t.me/poputkionline_bot"
-                }
-              ]
-            ]
-          }
-        });
         return;
       }
 
@@ -239,23 +222,6 @@ JSON Keys:
         log(`[Scraper] Rejected: Normalized cities not found. Raw from: "${parsed.from_city}", to: "${parsed.to_city}"`);
         // Clear reaction if cities not found
         await safeSetReaction(msg.chat.id, msg.message_id, '');
-
-        // Respond with fallback instruction to help the user manually or enter correctly
-        await safeSendMessage({
-          chat_id: msg.chat.id,
-          text: "🤖 Войдите в @poputkionline_bot, чтобы найти водителей или пассажиров вручную, либо укажите правильно время и направление поездки.",
-          reply_to_message_id: msg.message_id,
-          reply_markup: {
-            inline_keyboard: [
-              [
-                {
-                  text: "Открыть @poputkionline_bot",
-                  url: "https://t.me/poputkionline_bot"
-                }
-              ]
-            ]
-          }
-        });
         return;
       }
 
