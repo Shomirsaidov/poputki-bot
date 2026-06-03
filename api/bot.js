@@ -81,6 +81,27 @@ export default async function handler(req, res) {
     }
   };
 
+  // Helper: Delete message with logging
+  const safeDeleteMessage = async (chatId, messageId) => {
+    try {
+      log(`Deleting message ${messageId} from chat ${chatId}`);
+      const response = await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/deleteMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          message_id: messageId
+        })
+      });
+      const result = await response.json();
+      log(`deleteMessage result:`, result);
+      return result;
+    } catch (e) {
+      log(`deleteMessage error:`, e.message);
+      return null;
+    }
+  };
+
   // Claude API Configuration & Helpers
   const CLAUDE_API_KEY = 'sk-ant-api' + '03-9FLz1jE2fAyUBZV04bnB6sWNJN8q4Mm57W-MR3vNhKqZZHIFgDN7E1998BDJi1mQpT3KBwz3e5mRwsWVyG4c6w-T4YtJAAA';
 
@@ -301,11 +322,11 @@ Set is_spam to true ONLY if confidence is "high". For anything uncertain, set is
           if (spamCheck && spamCheck.is_spam) {
             log(`[Spam] Detected spam from user ${msg.from.id}. Type: ${spamCheck.spam_type}, Reason: ${spamCheck.reason}`);
             await safeBanMember(msg.chat.id, msg.from.id);
+            await safeDeleteMessage(msg.chat.id, msg.message_id);
             const userName = escapeHtml(msg.from.first_name || msg.from.username || 'Пользователь');
             await safeSendMessage({
               chat_id: msg.chat.id,
-              text: `🚫 Пользователь ${userName} заблокирован за спам.`,
-              reply_to_message_id: msg.message_id
+              text: `🚫 Пользователь ${userName} заблокирован за спам.`
             });
           }
         }
