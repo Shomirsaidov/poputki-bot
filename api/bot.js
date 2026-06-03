@@ -60,6 +60,27 @@ export default async function handler(req, res) {
     }
   };
 
+  // Helper: Ban chat member with logging
+  const safeBanMember = async (chatId, userId) => {
+    try {
+      log(`Banning user ${userId} from chat ${chatId}`);
+      const response = await fetch(`${TELEGRAM_API}/bot${BOT_TOKEN}/banChatMember`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          user_id: userId
+        })
+      });
+      const result = await response.json();
+      log(`banChatMember result:`, result);
+      return result;
+    } catch (e) {
+      log(`banChatMember error:`, e.message);
+      return null;
+    }
+  };
+
   // Claude API Configuration & Helpers
   const CLAUDE_API_KEY = 'sk-ant-api' + '03-9FLz1jE2fAyUBZV04bnB6sWNJN8q4Mm57W-MR3vNhKqZZHIFgDN7E1998BDJi1mQpT3KBwz3e5mRwsWVyG4c6w-T4YtJAAA';
 
@@ -191,6 +212,70 @@ JSON Keys:
     }
   };
 
+  const checkSpamWithClaude = async (text) => {
+    try {
+      log('Checking message for spam with Claude...');
+      const systemPrompt = `You are a moderation system for a ride-sharing Telegram group in Tajikistan. The group language is Russian and Tajik.
+
+Your task is to determine if a message is spam, fraud, or unwanted commercial content.
+
+Types of spam/fraud to look for:
+- Job announcements ("работа", "вакансия", "заработок", "подработка", "зарплата")
+- Side hustle offers ("легкий заработок", "пассивный доход", "на дому", "удаленно")
+- Advertisements ("реклама", "услуги", "предложение", "скидки")
+- Pyramid schemes / MLM / investment scams
+- Phishing or suspicious links
+- Fake profiles or impersonation
+- Any commercial promotion not related to ride-sharing
+
+If the message appears to be legitimate (ride announcement, general conversation, question about rides, etc.), classify it as normal.
+
+Return ONLY a valid JSON object. No markdown, no backticks, just pure JSON:
+{
+  "is_spam": true or false,
+  "spam_type": "spam" | "fraud" | "normal",
+  "confidence": "high" | "medium" | "low",
+  "reason": "brief explanation in Russian"
+}
+
+Set is_spam to true ONLY if confidence is "high". For anything uncertain, set is_spam to false.`;
+
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': CLAUDE_API_KEY,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-5-20250929',
+          max_tokens: 256,
+          messages: [
+            { role: 'user', content: `Analyze this message for spam:\n"${text}"\n\nSystem Prompt: ${systemPrompt}` }
+          ]
+        })
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Claude API returned status ${response.status}: ${errText}`);
+      }
+
+      const data = await response.json();
+      const contentText = data.content[0].text.trim();
+
+      let cleaned = contentText;
+      if (cleaned.startsWith('```')) {
+        cleaned = cleaned.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+      }
+
+      return JSON.parse(cleaned);
+    } catch (e) {
+      log('checkSpamWithClaude error: ' + e.message);
+      return { is_spam: false, spam_type: "normal", confidence: "low" };
+    }
+  };
+
   const handleGroupMessage = async (msg) => {
     if (msg.from && msg.from.is_bot) {
       log(`[Scraper] Skipping message from bot: ${msg.from.username}`);
@@ -209,6 +294,22 @@ JSON Keys:
         log('[Scraper] Message is not a valid ride announcement or is missing required fields.');
         // Clear reaction if it's not a ride announcement
         await safeSetReaction(msg.chat.id, msg.message_id, '');
+
+        // Check if the message is spam/fraud
+        if (text && msg.from && msg.from.id) {
+          const spamCheck = await checkSpamWithClaude(text);
+          if (spamCheck && spamCheck.is_spam) {
+            log(`[Spam] Detected spam from user ${msg.from.id}. Type: ${spamCheck.spam_type}, Reason: ${spamCheck.reason}`);
+            await safeBanMember(msg.chat.id, msg.from.id);
+            const userName = escapeHtml(msg.from.first_name || msg.from.username || 'Пользователь');
+            await safeSendMessage({
+              chat_id: msg.chat.id,
+              text: `🚫 Пользователь ${userName} заблокирован за спам.`,
+              reply_to_message_id: msg.message_id
+            });
+          }
+        }
+
         return;
       }
 
