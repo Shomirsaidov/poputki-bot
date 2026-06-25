@@ -53,7 +53,7 @@ async function main() {
             }
             const res = await callTelegram('setWebhook', { 
                 url,
-                allowed_updates: ["message", "edited_message", "callback_query", "my_chat_member", "chat_member"]
+                allowed_updates: ["message", "edited_message", "callback_query", "my_chat_member", "chat_member", "poll_answer"]
             });
             console.log('Set Webhook Result:', JSON.stringify(res, null, 2));
             
