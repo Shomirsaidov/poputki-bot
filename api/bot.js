@@ -575,6 +575,106 @@ Set is_spam to true ONLY if confidence is "high". For anything uncertain, set is
     const update = req.body;
     log(`Incoming ${req.method} update:`, update);
 
+    // Handle Poll Answer
+    const pollAnswer = update.poll_answer;
+    if (pollAnswer) {
+      log(`Received poll answer for poll ${pollAnswer.poll_id} from user ${pollAnswer.user.id}`);
+      
+      const sentPollUrl = `${SUPABASE_URL}/rest/v1/sent_polls?poll_id=eq.${pollAnswer.poll_id}&select=*`;
+      const sentResponse = await fetch(sentPollUrl, {
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+        }
+      });
+      
+      if (sentResponse.ok) {
+        const sentData = await sentResponse.json();
+        const sentPoll = sentData && sentData[0];
+        
+        if (sentPoll) {
+          const { booking_id, user_id, telegram_id } = sentPoll;
+          const selectedOptionIndex = pollAnswer.option_ids[0];
+          
+          if (selectedOptionIndex !== undefined) {
+            if (selectedOptionIndex === 3) {
+              // Custom option ("Ваш вариант") selected. Set bot state.
+              const clearStateUrl = `${SUPABASE_URL}/rest/v1/bot_user_states?telegram_id=eq.${telegram_id}`;
+              await fetch(clearStateUrl, {
+                method: 'DELETE',
+                headers: {
+                  'apikey': SUPABASE_ANON_KEY,
+                  'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                }
+              });
+
+              const stateUrl = `${SUPABASE_URL}/rest/v1/bot_user_states`;
+              await fetch(stateUrl, {
+                method: 'POST',
+                headers: {
+                  'apikey': SUPABASE_ANON_KEY,
+                  'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  telegram_id: telegram_id,
+                  state: 'waiting_for_poll_custom_answer',
+                  data: { booking_id, user_id }
+                })
+              });
+
+              await safeSendMessage({
+                chat_id: telegram_id,
+                text: "Пожалуйста, напишите текстовым сообщением, что именно помешало вам оформить билет."
+              });
+            } else {
+              // Predefined option selected
+              const settingsUrl = `${SUPABASE_URL}/rest/v1/poll_settings?id=eq.1&select=*`;
+              const settingsResponse = await fetch(settingsUrl, {
+                headers: {
+                  'apikey': SUPABASE_ANON_KEY,
+                  'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                }
+              });
+              
+              let optionText = 'Unknown option';
+              if (settingsResponse.ok) {
+                const settingsData = await settingsResponse.json();
+                const settings = settingsData && settingsData[0];
+                if (settings) {
+                  if (selectedOptionIndex === 0) optionText = settings.option1;
+                  else if (selectedOptionIndex === 1) optionText = settings.option2;
+                  else if (selectedOptionIndex === 2) optionText = settings.option3;
+                }
+              }
+
+              const answerUrl = `${SUPABASE_URL}/rest/v1/purchase_poll_answers`;
+              await fetch(answerUrl, {
+                method: 'POST',
+                headers: {
+                  'apikey': SUPABASE_ANON_KEY,
+                  'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  booking_id,
+                  user_id,
+                  telegram_id,
+                  answer: optionText
+                })
+              });
+
+              await safeSendMessage({
+                chat_id: telegram_id,
+                text: "Спасибо за ваш ответ! Это поможет нам сделать сервис лучше."
+              });
+            }
+          }
+        }
+      }
+      return res.status(200).json({ ok: true });
+    }
+
     // Support multiple update types
     const message = update.message || update.edited_message || update.channel_post || update.edited_channel_post;
     const callbackQuery = update.callback_query;
@@ -659,6 +759,58 @@ Set is_spam to true ONLY if confidence is "high". For anything uncertain, set is
       const text = message ? (message.text || "") : "";
       log(`Private event from ${chatId}: ${text || '[no text]'}`);
 
+      // Check if user is in a poll custom answer state
+      const stateUrl = `${SUPABASE_URL}/rest/v1/bot_user_states?telegram_id=eq.${chatId}&select=*`;
+      const stateResponse = await fetch(stateUrl, {
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+        }
+      });
+      
+      let userState = null;
+      if (stateResponse.ok) {
+        const stateData = await stateResponse.json();
+        userState = stateData && stateData[0];
+      }
+
+      if (userState && userState.state === 'waiting_for_poll_custom_answer' && text && !text.startsWith('/')) {
+        log(`User ${chatId} provided custom poll answer: "${text}"`);
+        const { booking_id, user_id } = userState.data || {};
+        
+        const answerUrl = `${SUPABASE_URL}/rest/v1/purchase_poll_answers`;
+        await fetch(answerUrl, {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            booking_id: booking_id,
+            user_id: user_id,
+            telegram_id: chatId.toString(),
+            answer: text
+          })
+        });
+
+        const clearStateUrl = `${SUPABASE_URL}/rest/v1/bot_user_states?telegram_id=eq.${chatId}`;
+        await fetch(clearStateUrl, {
+          method: 'DELETE',
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+          }
+        });
+
+        await safeSendMessage({
+          chat_id: chatId,
+          text: "Спасибо за ваш ответ! Это поможет нам сделать сервис лучше."
+        });
+        
+        return res.status(200).json({ ok: true });
+      }
+
       if (text === '/ping') {
         await safeSendMessage({ chat_id: chatId, text: "Pong! 🏓 Bot is active." });
         return res.status(200).json({ ok: true });
@@ -666,6 +818,16 @@ Set is_spam to true ONLY if confidence is "high". For anything uncertain, set is
 
       // Handle /start command (both with and without params)
       if (text.startsWith('/start')) {
+        // Clear state just in case they were waiting for custom answer
+        const clearStateUrl = `${SUPABASE_URL}/rest/v1/bot_user_states?telegram_id=eq.${chatId}`;
+        await fetch(clearStateUrl, {
+          method: 'DELETE',
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+          }
+        });
+
         const parts = text.split(' ');
         const param = parts.length > 1 ? parts[1] : null;
 
